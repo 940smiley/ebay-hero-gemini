@@ -55,6 +55,8 @@ Return STRICT JSON matching this schema:
   "suggestedCollection": "Suggested collection grouping",
   "suggestedFolder": "Category/Subcategory",
   "suggestedFilename": "SUGGESTED_NAME_001.jpg",
+  "proposedFilename": "SUGGESTED_NAME_001.jpg",
+  "proposedRelativeFolder": "Category/Subcategory",
   "confidenceScore": 85,
   "reasoning": "Reasoning explaining why this item was identified as such",
   "isUnverified": false,
@@ -62,6 +64,22 @@ Return STRICT JSON matching this schema:
     "low": 10.0,
     "median": 15.0,
     "high": 25.0
+  },
+  "ebayDraft": {
+    "title": "Strictly up to 80 chars high-converting listing title",
+    "subtitle": "Subtitle highlights",
+    "primaryCategoryId": "183437",
+    "primaryCategoryName": "Collectibles",
+    "conditionDescriptor": "Near Mint (NM 7)",
+    "itemSpecifics": {
+      "Brand": "Maker or Publisher",
+      "Type": "Item type",
+      "Era": "Year or Era"
+    },
+    "suggestedPriceBin": 25.0,
+    "suggestedStartingBid": 9.99,
+    "shippingPreset": "USPS Ground Advantage Bubble Mailer + Top Loader",
+    "descriptionHtml": "<div>Clean responsive item description HTML</div>"
   }
 }`;
 
@@ -95,6 +113,10 @@ Return STRICT JSON matching this schema:
 
     const text = response.text || '';
     const cleaned = text.replace(/```json\s*/gi, '').replace(/```\s*$/g, '').trim();
-    return JSON.parse(cleaned) as StructuredImageAnalysis;
+    const parsed = JSON.parse(cleaned) as StructuredImageAnalysis;
+    if (parsed.ebayDraft && parsed.ebayDraft.title && parsed.ebayDraft.title.length > 80) {
+      parsed.ebayDraft.title = parsed.ebayDraft.title.slice(0, 80);
+    }
+    return parsed;
   }
 }

@@ -57,6 +57,54 @@ describe('Google Photos Picker client', () => {
     expect(f.calls).toHaveLength(0);
   });
 
+  it('follows 302 redirects and preserves Authorization header across hops', async () => {
+    const f = mockFetch(
+      (url) => {
+        if (url.href === 'https://lh3.googleusercontent.com/item1=d') {
+          return new Response(null, {
+            status: 302,
+            headers: { Location: 'https://lh3.googleusercontent.com/storage-edge/download-abc' },
+          });
+        }
+        if (url.href === 'https://lh3.googleusercontent.com/storage-edge/download-abc') {
+          return bytes(JPEG);
+        }
+      }
+    );
+    const client = new PhotosPickerClient('BEARER_TOKEN_XYZ', f);
+    const res = await client.fetchMedia('https://lh3.googleusercontent.com/item1', 'original');
+    expect(res.ok).toBe(true);
+    expect(f.calls).toHaveLength(2);
+    expect(f.calls[0].url).toBe('https://lh3.googleusercontent.com/item1=d');
+    expect((f.calls[0].init?.headers as Record<string, string>).Authorization).toBe('Bearer BEARER_TOKEN_XYZ');
+    expect(f.calls[1].url).toBe('https://lh3.googleusercontent.com/storage-edge/download-abc');
+    expect((f.calls[1].init?.headers as Record<string, string>).Authorization).toBe('Bearer BEARER_TOKEN_XYZ');
+  });
+
+  it('retries without Authorization header if redirected storage host returns 401', async () => {
+    const f = mockFetch(
+      (url, init) => {
+        if (url.href === 'https://lh3.googleusercontent.com/item2=d') {
+          return new Response(null, {
+            status: 302,
+            headers: { Location: 'https://lh3.googleusercontent.com/signed-url/file' },
+          });
+        }
+        if (url.href === 'https://lh3.googleusercontent.com/signed-url/file') {
+          const auth = (init?.headers as Record<string, string> | undefined)?.Authorization;
+          if (auth) {
+            return new Response('Unauthorized signed request', { status: 401 });
+          }
+          return bytes(JPEG);
+        }
+      }
+    );
+    const client = new PhotosPickerClient('BEARER_TOKEN_XYZ', f);
+    const res = await client.fetchMedia('https://lh3.googleusercontent.com/item2', 'original');
+    expect(res.ok).toBe(true);
+    expect(f.calls).toHaveLength(3);
+  });
+
   it('gives an actionable message for 403 (API not enabled / scope missing) and expired sessions', async () => {
     const mk = (status: number) => new PhotosPickerClient('t', mockFetch(() => json({ error: { message: 'x' } }, status)));
     await expect(mk(403).getSession('s')).rejects.toThrow(/not been granted|not enabled/);
@@ -114,6 +162,19 @@ describe('Managed image library', () => {
     expect(lib.list()).toHaveLength(1);
   });
 
+  it('deletes a record and cleans up the stored file from disk', async () => {
+    const dir = tmp();
+    const lib = new ManagedLibrary(dir);
+    const { record } = await lib.ingest(Readable.from([PNG]), 'photo.png', src);
+    expect(lib.get(record.id)).toBeDefined();
+    expect(fs.existsSync(lib.filePath(record))).toBe(true);
+
+    const deleted = lib.delete(record.id);
+    expect(deleted).toBe(true);
+    expect(lib.get(record.id)).toBeUndefined();
+    expect(fs.existsSync(lib.filePath(record))).toBe(false);
+  });
+
   it('enforces the size limit mid-stream', async () => {
     const lib = new ManagedLibrary(tmp(), 100);
     const big = Buffer.concat([JPEG, Buffer.alloc(500)]);
@@ -125,3 +186,4 @@ describe('Managed image library', () => {
     await expect(lib.ingest(Readable.from([]), 'e.jpg', src)).rejects.toMatchObject({ code: 'empty' });
   });
 });
+

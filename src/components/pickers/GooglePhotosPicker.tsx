@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { apiRequest, streamNdjson } from '../../services/api.ts';
 import { ImageItem } from '../../types/index.ts';
+import { logger } from '../../services/logger.ts';
 
 interface PickedPhotoItem {
   id: string;
@@ -64,6 +65,8 @@ export const GooglePhotosPicker: React.FC<GooglePhotosPickerProps> = ({ onImport
   const [session, setSession] = useState<PickerSession | null>(null);
   const [isCreatingSession, setIsCreatingSession] = useState(false);
   const [isWaitingForGoogle, setIsWaitingForGoogle] = useState(false);
+  const [checkingStatus, setCheckingStatus] = useState(false);
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const [windowClosedPrompt, setWindowClosedPrompt] = useState(false);
   const [pickedItems, setPickedItems] = useState<PickedPhotoItem[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -148,11 +151,21 @@ export const GooglePhotosPicker: React.FC<GooglePhotosPickerProps> = ({ onImport
     );
   };
 
-  // Check active session status immediately
-  const checkSessionStatus = useCallback(async (sessionId: string) => {
+  // Check active session status
+  const checkSessionStatus = useCallback(async (sessionId: string, isManual = false) => {
+    if (isManual) {
+      setCheckingStatus(true);
+      setStatusMessage(null);
+    }
+    logger.debug('Google Photos', 'session_status_check', `Checking session status for ${sessionId}`, {
+      operationId: sessionId,
+      action: isManual ? 'manual_check' : 'poll_tick',
+    });
+
     try {
       const s = await apiRequest<PickerSession>(`/api/google/photos/session/${sessionId}`);
       setSession(s);
+
       if (s.mediaItemsSet) {
         if (pollTimerRef.current) clearInterval(pollTimerRef.current);
         pollTimerRef.current = null;
@@ -160,13 +173,40 @@ export const GooglePhotosPicker: React.FC<GooglePhotosPickerProps> = ({ onImport
         popupWatcherRef.current = null;
         setIsWaitingForGoogle(false);
         setWindowClosedPrompt(false);
+        setStatusMessage(null);
+        logger.info('Google Photos', 'media_items_ready', `User completed selection in Google Photos for session ${sessionId}`, {
+          operationId: sessionId,
+          details: { itemCount: s.itemCount },
+        });
         await loadPickedItems(sessionId);
         return true;
       }
+
+      if (isManual) {
+        setStatusMessage('Google Photos indicates items have not been confirmed yet. If you selected photos and clicked Done, please wait a moment and click Check Status again. Or click Reopen Window.');
+        setIsWaitingForGoogle(false);
+        setWindowClosedPrompt(true);
+      }
       return false;
     } catch (e: any) {
-      console.warn('Session check warning:', e);
+      logger.warn('Google Photos', 'session_check_warning', `Session check returned: ${e.message}`, {
+        operationId: sessionId,
+        details: { error: e.message, status: e.status },
+      });
+      if (isManual) {
+        if (e.status === 404 || e.message?.includes('expired') || e.message?.includes('not found')) {
+          setStatusMessage('The previous Google Photos session has expired. Click Reopen Google Photos to create a fresh session.');
+        } else {
+          setStatusMessage(`Could not verify status: ${e.message}`);
+        }
+        setIsWaitingForGoogle(false);
+        setWindowClosedPrompt(true);
+      }
       return false;
+    } finally {
+      if (isManual) {
+        setCheckingStatus(false);
+      }
     }
   }, []);
 
@@ -175,10 +215,11 @@ export const GooglePhotosPicker: React.FC<GooglePhotosPickerProps> = ({ onImport
     if (pollTimerRef.current) clearInterval(pollTimerRef.current);
     setIsWaitingForGoogle(true);
     setWindowClosedPrompt(false);
+    setStatusMessage(null);
 
     const pollInterval = Math.max(intervalMs, 2000);
     pollTimerRef.current = setInterval(async () => {
-      const finished = await checkSessionStatus(sessionId);
+      const finished = await checkSessionStatus(sessionId, false);
       if (finished) {
         clearInterval(pollTimerRef.current);
         pollTimerRef.current = null;
@@ -192,17 +233,26 @@ export const GooglePhotosPicker: React.FC<GooglePhotosPickerProps> = ({ onImport
         clearInterval(popupWatcherRef.current);
         popupWatcherRef.current = null;
         popupRef.current = null;
+        logger.info('Google Photos', 'popup_window_closed', `Picker popup closed for session ${sessionId}. Verifying selection state...`, {
+          operationId: sessionId,
+        });
 
-        // The popup closed. Check immediately, then retry twice after short delays
-        const finishedNow = await checkSessionStatus(sessionId);
+        // The popup closed. Check immediately, then retry with backoff
+        const finishedNow = await checkSessionStatus(sessionId, false);
         if (!finishedNow) {
           setTimeout(async () => {
-            const finished2 = await checkSessionStatus(sessionId);
+            const finished2 = await checkSessionStatus(sessionId, false);
             if (!finished2) {
               setTimeout(async () => {
-                const finished3 = await checkSessionStatus(sessionId);
+                const finished3 = await checkSessionStatus(sessionId, false);
                 if (!finished3) {
+                  // After retries, stop the indefinite waiting spinner and prompt the user cleanly
+                  setIsWaitingForGoogle(false);
                   setWindowClosedPrompt(true);
+                  setStatusMessage('Selection window was closed. If you selected photos and clicked Done, click Check for Selected Photos below. Or click Reopen Google Photos to start again.');
+                  logger.info('Google Photos', 'popup_closed_unconfirmed', 'Popup closed without immediate media confirmation. Awaiting user action.', {
+                    operationId: sessionId,
+                  });
                 }
               }, 2500);
             }
@@ -217,7 +267,7 @@ export const GooglePhotosPicker: React.FC<GooglePhotosPickerProps> = ({ onImport
     const handleFocus = () => {
       const sid = activeSessionIdRef.current;
       if (sid && isWaitingForGoogle) {
-        checkSessionStatus(sid);
+        checkSessionStatus(sid, false);
       }
     };
     window.addEventListener('focus', handleFocus);
@@ -228,14 +278,23 @@ export const GooglePhotosPicker: React.FC<GooglePhotosPickerProps> = ({ onImport
   const launchGooglePhotosPicker = async () => {
     setIsCreatingSession(true);
     setError(null);
+    setStatusMessage(null);
     setWindowClosedPrompt(false);
+    const opId = logger.generateId('photos-launch');
+
     try {
+      logger.info('Google Photos', 'create_session_request', 'Creating Google Photos Picker session via API', { operationId: opId });
       const newSession = await apiRequest<PickerSession>('/api/google/photos/session', {
         method: 'POST',
         body: JSON.stringify({ maxItemCount: 500 }),
       });
       setSession(newSession);
       activeSessionIdRef.current = newSession.id;
+
+      logger.info('Google Photos', 'session_created', `Picker session initialized with ID: ${newSession.id}`, {
+        operationId: newSession.id,
+        details: { pickerUri: newSession.pickerUri, pollIntervalMs: newSession.pollIntervalMs },
+      });
 
       // Open Google's Picker Dialog in a popup
       const width = 840;
@@ -249,9 +308,9 @@ export const GooglePhotosPicker: React.FC<GooglePhotosPickerProps> = ({ onImport
       );
 
       if (!popup || popup.closed || typeof popup.closed === 'undefined') {
-        // Popup was blocked by browser
         setError('The Google Photos selection window was blocked by your browser. Please allow popups for this site and click Retry.');
         setIsCreatingSession(false);
+        logger.warn('Google Photos', 'popup_blocked', 'Browser blocked Google Photos popup window', { operationId: newSession.id });
         return;
       }
 
@@ -263,13 +322,18 @@ export const GooglePhotosPicker: React.FC<GooglePhotosPickerProps> = ({ onImport
       } else {
         setError(err.message || 'Failed to start Google Photos Picker session');
       }
+      logger.error('Google Photos', 'create_session_failed', `Failed to initialize session: ${err.message}`, {
+        operationId: opId,
+        details: { error: err.message },
+      });
     } finally {
       setIsCreatingSession(false);
     }
   };
 
   const reopenPickerWindow = () => {
-    if (!session?.pickerUri) {
+    // If no session exists or status message indicates expiration, start a fresh session
+    if (!session?.pickerUri || statusMessage?.includes('expired') || !activeSessionIdRef.current) {
       launchGooglePhotosPicker();
       return;
     }
@@ -284,6 +348,7 @@ export const GooglePhotosPicker: React.FC<GooglePhotosPickerProps> = ({ onImport
     );
     popupRef.current = popup;
     setWindowClosedPrompt(false);
+    setStatusMessage(null);
     startPolling(session.id, session.pollIntervalMs || 3000);
   };
 
@@ -329,6 +394,8 @@ export const GooglePhotosPicker: React.FC<GooglePhotosPickerProps> = ({ onImport
     setError(null);
     const importedItems: ImageItem[] = [];
     importedItemsRef.current = importedItems;
+
+    const lastErrorDetails: Array<{ name?: string; message: string; code?: string; opId?: string }> = [];
 
     try {
       await streamNdjson(
@@ -378,11 +445,23 @@ export const GooglePhotosPicker: React.FC<GooglePhotosPickerProps> = ({ onImport
               ...prev,
               failedCount: prev.failedCount + 1,
             }));
+            lastErrorDetails.push({
+              name: event.name,
+              message: event.message,
+              code: event.code,
+              opId: event.opId,
+            });
+            logger.error('Google Photos', 'item_import_failed', `Failed to import ${event.name || 'item'}: ${event.message}`, {
+              operationId: event.opId || session.id,
+              details: { name: event.name, code: event.code, error: event.message },
+            });
           } else if (event.type === 'done') {
             if (importedItems.length > 0) {
               onImportComplete(importedItems);
             } else {
-              setError('Import finished but no valid image files could be imported.');
+              const firstErr = lastErrorDetails[0];
+              const msg = firstErr ? `${firstErr.name ? `"${firstErr.name}": ` : ''}${firstErr.message}` : 'Import finished but no valid image files could be imported.';
+              setError(`Import failed: ${msg}`);
             }
           }
         }
@@ -395,9 +474,23 @@ export const GooglePhotosPicker: React.FC<GooglePhotosPickerProps> = ({ onImport
   };
 
   const handleCancelSession = async () => {
-    if (session?.id) {
+    if (pollTimerRef.current) {
+      clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
+    if (popupWatcherRef.current) {
+      clearInterval(popupWatcherRef.current);
+      popupWatcherRef.current = null;
+    }
+    if (popupRef.current && !popupRef.current.closed) {
+      try { popupRef.current.close(); } catch {}
+      popupRef.current = null;
+    }
+    const sid = session?.id || activeSessionIdRef.current;
+    if (sid) {
       try {
-        await apiRequest(`/api/google/photos/session/${session.id}`, { method: 'DELETE' });
+        await apiRequest(`/api/google/photos/session/${sid}`, { method: 'DELETE' });
+        logger.info('Google Photos', 'session_cancelled', `Deleted session ${sid} on server`, { operationId: sid });
       } catch (e) {
         console.warn('Session delete warning:', e);
       }
@@ -407,6 +500,8 @@ export const GooglePhotosPicker: React.FC<GooglePhotosPickerProps> = ({ onImport
     setPickedItems([]);
     setSelectedIds(new Set());
     setIsWaitingForGoogle(false);
+    setCheckingStatus(false);
+    setStatusMessage(null);
     setWindowClosedPrompt(false);
     setError(null);
   };
@@ -563,13 +658,21 @@ export const GooglePhotosPicker: React.FC<GooglePhotosPickerProps> = ({ onImport
                   <p className="text-[11px] text-slate-400 leading-relaxed">
                     Choose photos in Google Photos, then click <strong>Done</strong>. When the popup closes, eBay Hero will automatically fetch your items.
                   </p>
-                  <div className="flex items-center gap-2 pt-1">
+
+                  {statusMessage && (
+                    <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/20 text-[11px] text-amber-300">
+                      {statusMessage}
+                    </div>
+                  )}
+
+                  <div className="flex items-center gap-2 pt-1 flex-wrap">
                     <button
-                      onClick={() => session && checkSessionStatus(session.id)}
-                      className="px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+                      onClick={() => session && checkSessionStatus(session.id, true)}
+                      disabled={checkingStatus}
+                      className="px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 disabled:opacity-50 text-amber-300 text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
                     >
-                      <RefreshCw className="w-3 h-3" />
-                      <span>Check Status Now</span>
+                      <RefreshCw className={`w-3 h-3 ${checkingStatus ? 'animate-spin' : ''}`} />
+                      <span>{checkingStatus ? 'Checking Google...' : 'Check Status Now'}</span>
                     </button>
                     <button
                       onClick={reopenPickerWindow}
@@ -595,21 +698,41 @@ export const GooglePhotosPicker: React.FC<GooglePhotosPickerProps> = ({ onImport
                     <span>Selection Window Closed</span>
                   </div>
                   <p className="text-[11px] text-slate-300 leading-relaxed">
-                    Did you finish choosing photos and click Done? Click below to check for your photos or reopen the selection window.
+                    Did you finish choosing photos and click Done? Click below to retrieve your photos or reopen the selection window.
                   </p>
-                  <div className="flex items-center gap-2 pt-1">
+
+                  {statusMessage && (
+                    <div className="p-2.5 rounded-lg bg-slate-900 border border-blue-500/30 text-[11px] text-blue-200">
+                      {statusMessage}
+                    </div>
+                  )}
+
+                  <div className="flex items-center gap-2 pt-1 flex-wrap">
                     <button
-                      onClick={() => session && checkSessionStatus(session.id)}
-                      className="px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"
+                      onClick={() => session && checkSessionStatus(session.id, true)}
+                      disabled={checkingStatus}
+                      className="px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-1.5 cursor-pointer"
                     >
-                      <RefreshCw className="w-3 h-3" />
-                      <span>Check for Selected Photos</span>
+                      <RefreshCw className={`w-3 h-3 ${checkingStatus ? 'animate-spin' : ''}`} />
+                      <span>{checkingStatus ? 'Checking Google...' : 'Check for Selected Photos'}</span>
                     </button>
                     <button
                       onClick={reopenPickerWindow}
                       className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold cursor-pointer"
                     >
                       Reopen Google Photos
+                    </button>
+                    <button
+                      onClick={launchGooglePhotosPicker}
+                      className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white text-xs font-semibold cursor-pointer"
+                    >
+                      Start Fresh
+                    </button>
+                    <button
+                      onClick={handleCancelSession}
+                      className="text-slate-400 hover:text-white text-xs ml-auto cursor-pointer"
+                    >
+                      Cancel
                     </button>
                   </div>
                 </div>

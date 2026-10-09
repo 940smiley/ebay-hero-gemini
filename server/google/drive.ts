@@ -261,13 +261,26 @@ export class DriveClient {
     return this.request(`${DRIVE_API}/files/${assertDriveId(fileId)}?alt=media&supportsAllDrives=true`);
   }
 
-  /** Fetches a thumbnail via the file's current (short-lived) thumbnailLink. Returns null if Drive has none. */
+  /** Fetches a thumbnail via the file's current (short-lived) thumbnailLink. Returns null if Drive has none or host is foreign. */
   async thumbnail(fileId: string, size = 256): Promise<Response | null> {
     const raw = await this.json<{ thumbnailLink?: string }>(`${DRIVE_API}/files/${assertDriveId(fileId)}?fields=thumbnailLink&supportsAllDrives=true`);
     if (!raw.thumbnailLink) return null;
     const url = raw.thumbnailLink.replace(/=s\d+$/, `=s${Math.min(Math.max(size, 32), 1024)}`);
     if (!/^https:\/\/[a-z0-9.-]*\.(googleusercontent|google)\.com\//i.test(url)) return null;
-    return this.request(url);
+
+    // Google usercontent links should be fetched without Authorization header to avoid 401/403
+    try {
+      const unauthedRes = await this.fetchImpl(url);
+      if (unauthedRes.ok) return unauthedRes;
+    } catch {
+      // fallback to auth
+    }
+
+    try {
+      return await this.request(url);
+    } catch {
+      return null;
+    }
   }
 }
 

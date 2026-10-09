@@ -155,6 +155,61 @@ export class PhotosPickerClient {
       throw new GoogleApiError('Refusing to fetch media from an unexpected host.', 400, 'badHost');
     }
     const suffix = mode === 'original' ? '=d' : `=w${thumbSize}-h${thumbSize}`;
-    return this.request(baseUrl + suffix);
+    let currentUrl = baseUrl + suffix;
+    let redirectCount = 0;
+    const maxRedirects = 5;
+
+    while (redirectCount < maxRedirects) {
+      // First attempt with Authorization header and manual redirect handling
+      const res = await this.fetchImpl(currentUrl, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${this.token}` },
+        redirect: 'manual',
+      });
+
+      // Check if redirect
+      if ([301, 302, 303, 307, 308].includes(res.status)) {
+        const location = res.headers.get('location');
+        if (!location) {
+          throw new GoogleApiError('Redirect response missing Location header.', res.status, 'redirectError');
+        }
+        currentUrl = new URL(location, currentUrl).href;
+        if (!/^https:\/\/[a-z0-9.-]*\.(googleusercontent|google)\.com\//i.test(currentUrl)) {
+          throw new GoogleApiError('Refusing to follow redirect to an untrusted host.', 400, 'badHost');
+        }
+        redirectCount++;
+        continue;
+      }
+
+      // If initial or redirected request returned 401/403 on redirected CDN host, retry once without Authorization header
+      if ((res.status === 401 || res.status === 403) && redirectCount > 0) {
+        const retryRes = await this.fetchImpl(currentUrl, {
+          method: 'GET',
+          redirect: 'manual',
+        });
+        if (retryRes.ok) {
+          return retryRes;
+        }
+      }
+
+      if (res.ok) {
+        return res;
+      }
+
+      let message = `Google Photos Picker error (${res.status})`;
+      let reason: string | undefined;
+      try {
+        const b = (await res.json()) as { error?: { message?: string; status?: string } };
+        message = b.error?.message ?? message;
+        reason = b.error?.status;
+      } catch { /* non-JSON */ }
+      if (res.status === 401) message = 'Google rejected the access token. Reconnect your account.';
+      else if (res.status === 403) message = 'Google Photos access has not been granted, or the Photos Picker API is not enabled for this Google Cloud project.';
+      else if (res.status === 404) message = 'Photo item not found or expired.';
+      throw new GoogleApiError(message, res.status, reason);
+    }
+
+    throw new GoogleApiError('Too many redirects while downloading photo media.', 500, 'tooManyRedirects');
   }
 }
+

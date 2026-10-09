@@ -45,6 +45,8 @@ export interface StructuredImageAnalysis {
   suggestedCollection: string;
   suggestedFolder: string;
   suggestedFilename: string;
+  proposedFilename?: string;
+  proposedRelativeFolder?: string;
   confidenceScore: number; // 0 - 100
   reasoning: string;
   isUnverified: boolean;
@@ -52,6 +54,18 @@ export interface StructuredImageAnalysis {
     low: number;
     median: number;
     high: number;
+  };
+  ebayDraft?: {
+    title: string;
+    subtitle?: string;
+    primaryCategoryId?: string;
+    primaryCategoryName?: string;
+    conditionDescriptor?: string;
+    itemSpecifics?: Record<string, string>;
+    suggestedPriceBin?: number;
+    suggestedStartingBid?: number;
+    shippingPreset?: string;
+    descriptionHtml?: string;
   };
   pluginData?: Record<string, any>;
 }

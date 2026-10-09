@@ -79,6 +79,19 @@ export class ManagedLibrary {
     return this.readIndex().find((r) => r.id === id);
   }
 
+  delete(id: string): boolean {
+    const index = this.readIndex();
+    const idx = index.findIndex((r) => r.id === id);
+    if (idx === -1) return false;
+    const [rec] = index.splice(idx, 1);
+    try {
+      const full = path.resolve(this.dir, rec.storedFile);
+      if (fs.existsSync(full)) fs.rmSync(full, { force: true });
+    } catch {}
+    this.writeIndex(index);
+    return true;
+  }
+
   filePath(record: LibraryRecord): string {
     const full = path.resolve(this.dir, record.storedFile);
     if (!full.startsWith(path.resolve(this.dir) + path.sep)) throw new Error('Path escapes library directory');
@@ -89,7 +102,7 @@ export class ManagedLibrary {
    * Streams bytes to disk, validating size and real image type. If an identical file (sha256) already exists it is
    * reused and `duplicate` is true. Original files at the source are never touched.
    */
-  async ingest(body: ReadableStream<Uint8Array> | Readable, originalName: string, source: ImageSourceRef): Promise<{ record: LibraryRecord; duplicate: boolean }> {
+  async ingest(body: ReadableStream<Uint8Array> | Readable | Buffer, originalName: string, source: ImageSourceRef): Promise<{ record: LibraryRecord; duplicate: boolean }> {
     const tmpFile = path.join(this.dir, `.incoming-${crypto.randomUUID()}`);
     const hash = crypto.createHash('sha256');
     let size = 0;
@@ -101,7 +114,11 @@ export class ManagedLibrary {
         cb(null, chunk);
       },
     });
-    const readable = body instanceof Readable ? body : Readable.fromWeb(body as never);
+    const readable = Buffer.isBuffer(body)
+      ? Readable.from(body)
+      : body instanceof Readable
+      ? body
+      : Readable.fromWeb(body as never);
     try {
       await pipeline(readable, limiter, fs.createWriteStream(tmpFile));
       if (size === 0) throw new ImageRejectedError('File is empty.', 'empty');
