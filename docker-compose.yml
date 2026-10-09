@@ -1,0 +1,29 @@
+services:
+  ebay-hero:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - NODE_ENV=production
+      - PORT=3000
+    volumes:
+      # Optional: Mount your local Google Drive Desktop or local inventory directory
+      - ~/My Drive:/data/drive:ro
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ebay_hero
+      POSTGRES_USER: ebay_admin
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-secure_vault_password_2026}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./server/databaseSchema.ts:/docker-entrypoint-initdb.d/init.sql:ro
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+
+volumes:
+  pgdata:

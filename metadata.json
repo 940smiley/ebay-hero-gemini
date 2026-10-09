@@ -1,0 +1,7 @@
+{
+  "name": "eBay Hero Gemini Edition",
+  "description": "AI-powered collectibles, photo management, intelligent rename, local sync, and eBay e-commerce listing assistant powered by Gemini Vision.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
