@@ -296,7 +296,32 @@ app.get('/api/schema', (_req: Request, res: Response) => {
 // 7. Local AI Endpoint Test (Ollama / Qwen / Local OpenAI API)
 app.post('/api/local-ai/test', async (req: Request, res: Response) => {
   const { endpoint, model } = req.body;
-  const targetUrl = endpoint || 'http://127.0.0.1:11434/api/tags';
+  const rawEndpoint = typeof endpoint === 'string' && endpoint.trim().length > 0
+    ? endpoint.trim()
+    : 'http://127.0.0.1:11434/api/tags';
+
+  let targetUrl: string;
+  try {
+    const parsed = new URL(rawEndpoint, 'http://127.0.0.1');
+    const allowedProtocols = new Set(['http:', 'https:']);
+    const allowedHosts = new Set(['localhost', '127.0.0.1', '::1']);
+
+    if (!allowedProtocols.has(parsed.protocol)) {
+      return res.status(400).json({ success: false, message: 'Invalid endpoint protocol.' });
+    }
+
+    if (!allowedHosts.has(parsed.hostname)) {
+      return res.status(400).json({ success: false, message: 'Endpoint host must be local.' });
+    }
+
+    if (parsed.username || parsed.password) {
+      return res.status(400).json({ success: false, message: 'Endpoint must not include credentials.' });
+    }
+
+    targetUrl = parsed.toString();
+  } catch {
+    return res.status(400).json({ success: false, message: 'Invalid endpoint URL.' });
+  }
 
   try {
     const controller = new AbortController();
