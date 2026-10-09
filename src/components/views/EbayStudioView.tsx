@@ -37,6 +37,7 @@ import {
   downloadEbayCsv 
 } from '../../services/api.ts';
 import { EbayListingTemplate, CsvValidationResult } from '../../types/index.ts';
+import { MarketInsights } from '../ebay/MarketInsights.tsx';
 
 export const EbayStudioView: React.FC = () => {
   const { 
@@ -622,6 +623,18 @@ export const EbayStudioView: React.FC = () => {
               </button>
             </div>
           </div>
+
+          {/* Gemini Vision Market Insights Component */}
+          <MarketInsights
+            item={selectedItem}
+            draft={draft}
+            onApplyPricing={(suggestedBin, suggestedBid) => {
+              updateDraft({
+                suggestedPriceBin: suggestedBin,
+                suggestedStartingBid: suggestedBid,
+              });
+            }}
+          />
 
           {/* Pricing & Shipping Calculator */}
           <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">

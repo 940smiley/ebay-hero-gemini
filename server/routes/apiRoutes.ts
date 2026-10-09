@@ -9,6 +9,7 @@ import { requireCsrfHeader } from '../google/routes.ts';
 import { ManagedLibrary } from '../library.ts';
 import { GoogleAccountService } from '../google/accounts.ts';
 import { serverLogger, ServerLogLevel } from '../logger.ts';
+import { analyzeMarketInsightsWithGemini } from '../gemini.ts';
 
 export interface ApiRoutesDeps {
   aiService: AiService;
@@ -94,6 +95,64 @@ export function createExtendedApiRouter(deps: ApiRoutesDeps): Router {
         details: { error: err.message },
       });
       res.status(500).json({ error: err.message || 'AI analysis failed' });
+    }
+  });
+
+  // ==========================================
+  // 1b. Gemini Vision Market Insights & Historical eBay Comps
+  // ==========================================
+  router.post('/ai/market-insights', async (req: Request, res: Response) => {
+    const opId = serverLogger.generateId('market-insights-op');
+    try {
+      const { imageBase64, mimeType, originalFilename, model, enableThinking, assetId, collectibleDetails } = req.body;
+
+      let resolvedBase64 = imageBase64 || '';
+      let resolvedMimeType = mimeType || 'image/jpeg';
+
+      // Resolve library files into actual base64 image bytes from disk if needed
+      const libraryMatch = resolvedBase64.match(/\/api\/library\/([a-zA-Z0-9_\-]+)\/file/) || (assetId ? [null, assetId] : null);
+      if (libraryMatch && library) {
+        const libId = libraryMatch[1];
+        const rec = library.get(libId);
+        if (rec) {
+          const fPath = library.filePath(rec);
+          if (fs.existsSync(fPath)) {
+            const buf = fs.readFileSync(fPath);
+            resolvedBase64 = `data:${rec.mimeType};base64,${buf.toString('base64')}`;
+            resolvedMimeType = rec.mimeType;
+          }
+        }
+      }
+
+      serverLogger.info('Gemini Vision', 'market_insights_request', `Generating Market Insights for ${originalFilename || 'collectible'}`, {
+        operationId: opId,
+        details: { model: model || 'gemini-3.8-flash' },
+      });
+
+      const startTime = Date.now();
+      const insights = await analyzeMarketInsightsWithGemini({
+        imageBase64: resolvedBase64,
+        mimeType: resolvedMimeType,
+        originalFilename: originalFilename || 'collectible.jpg',
+        model: model || 'gemini-3.8-flash',
+        enableThinking: Boolean(enableThinking),
+        collectibleDetails,
+      });
+
+      const durationMs = Date.now() - startTime;
+      serverLogger.info('Gemini Vision', 'market_insights_success', `Generated Market Insights in ${durationMs}ms`, {
+        operationId: opId,
+        durationMs,
+        details: { recommendedPriceBin: insights.recommendedPriceBin },
+      });
+
+      res.json(insights);
+    } catch (err: any) {
+      serverLogger.error('Gemini Vision', 'market_insights_error', `Market insights failed: ${err.message}`, {
+        operationId: opId,
+        details: { error: err.message },
+      });
+      res.status(500).json({ error: err.message || 'Market insights failed' });
     }
   });
 

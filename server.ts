@@ -3,7 +3,7 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
-import { analyzeImageWithGemini, askGeminiChat } from './server/gemini.ts';
+import { analyzeImageWithGemini, askGeminiChat, analyzeMarketInsightsWithGemini } from './server/gemini.ts';
 import { generateScriptBundle } from './server/scriptGenerator.ts';
 import { POSTGRESQL_SCHEMA_SQL } from './server/databaseSchema.ts';
 import { EncryptedJsonFile, getEncryptionKey } from './server/security/secretStore.ts';
@@ -78,6 +78,25 @@ app.post('/api/analyze', async (req: Request, res: Response) => {
   } catch (error: any) {
     console.error('API /analyze error:', error);
     res.status(500).json({ error: error.message || 'Analysis failed' });
+  }
+});
+
+// 2b. Gemini Vision Market Insights & Historical eBay Comps
+app.post('/api/market-insights', async (req: Request, res: Response) => {
+  try {
+    const { imageBase64, mimeType, originalFilename, model, enableThinking, collectibleDetails } = req.body;
+    const result = await analyzeMarketInsightsWithGemini({
+      imageBase64,
+      mimeType: mimeType || 'image/jpeg',
+      originalFilename: originalFilename || 'collectible.jpg',
+      model: model || 'gemini-3.8-flash',
+      enableThinking: Boolean(enableThinking),
+      collectibleDetails,
+    });
+    res.json(result);
+  } catch (error: any) {
+    console.error('API /api/market-insights error:', error);
+    res.status(500).json({ error: error.message || 'Market insights failed' });
   }
 });
 

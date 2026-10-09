@@ -1,6 +1,7 @@
 /**
  * Client HTTP utility with CSRF header, NDJSON stream parser, and error handling.
  */
+import { MarketInsightsData } from '../types/index.ts';
 
 export interface ApiResponse<T> {
   data?: T;
@@ -122,6 +123,30 @@ export async function analyzeImage(payload: {
   enableThinking?: boolean;
 }) {
   return apiRequest('/api/ai/analyze', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getMarketInsights(payload: {
+  imageBase64?: string;
+  assetId?: string;
+  mimeType?: string;
+  originalFilename?: string;
+  model?: string;
+  enableThinking?: boolean;
+  collectibleDetails?: {
+    title?: string;
+    category?: string;
+    subcategory?: string;
+    brand?: string;
+    condition?: string;
+    grader?: string;
+    currentSuggestedPrice?: number;
+    tags?: string[];
+  };
+}): Promise<MarketInsightsData> {
+  return apiRequest<MarketInsightsData>('/api/ai/market-insights', {
     method: 'POST',
     body: JSON.stringify(payload),
   });

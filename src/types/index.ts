@@ -534,3 +534,52 @@ export interface OperationManifest {
     restored: boolean;
   }>;
 }
+
+export interface HistoricalSoldComp {
+  title: string;
+  soldDate: string;
+  price: number;
+  condition: string;
+  format: 'Auction' | 'Buy It Now' | 'Best Offer Accepted';
+  bidsCount?: number;
+  source: string;
+  isVerified?: boolean;
+}
+
+export interface GradeMultiplier {
+  grade: string;
+  price: number;
+  multiplier: string;
+  roiVsGradingCost?: string;
+}
+
+export interface MarketInsightsData {
+  collectibleTitle: string;
+  category: string;
+  recommendedPriceBin: number;
+  recommendedStartingBid: number;
+  estimatedRange: {
+    low: number;
+    median: number;
+    high: number;
+    peak: number;
+  };
+  trend: {
+    direction: 'up' | 'down' | 'stable';
+    percentage: string;
+    timeFrame: string;
+    label: string;
+  };
+  sellThroughRate: number;
+  averageDaysToSell: number;
+  liquidityScore: 'High' | 'Moderate' | 'Niche' | 'Rare Asset';
+  confidenceScore: number;
+  compsCountAnalyzed: number;
+  soldComps: HistoricalSoldComp[];
+  gradeMultipliers: GradeMultiplier[];
+  marketSummary: string;
+  visualPricingClues: string[];
+  sellingStrategyTips: string[];
+  optimalListingTime: string;
+  analyzedAt: string;
+}
