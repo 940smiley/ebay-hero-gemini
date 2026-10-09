@@ -6,6 +6,14 @@ import fs from 'fs';
 import { analyzeImageWithGemini, askGeminiChat } from './server/gemini.ts';
 import { generateScriptBundle } from './server/scriptGenerator.ts';
 import { POSTGRESQL_SCHEMA_SQL } from './server/databaseSchema.ts';
+import { EncryptedJsonFile, getEncryptionKey } from './server/security/secretStore.ts';
+import { GoogleAccountService, GoogleStoreShape, configFromEnv } from './server/google/accounts.ts';
+import { createGoogleRouter, createLibraryRouter } from './server/google/routes.ts';
+import { ManagedLibrary } from './server/library.ts';
+import { AiService } from './server/ai/aiService.ts';
+import { EbayService } from './server/ebay/ebayService.ts';
+import { PluginRegistry } from './server/plugins/pluginRegistry.ts';
+import { createExtendedApiRouter } from './server/routes/apiRoutes.ts';
 
 dotenv.config();
 
@@ -18,6 +26,24 @@ const port = process.env.PORT || 3000;
 // High limit for processing high-res batch card photos
 app.use(express.json({ limit: '60mb' }));
 app.use(express.urlencoded({ extended: true, limit: '60mb' }));
+
+// Google integrations (server-side OAuth, Drive API, Photos Picker API) + managed image library
+const dataDir = path.resolve(process.env.EBAY_HERO_DATA_DIR || path.join(process.cwd(), 'data'));
+const googleStore = new EncryptedJsonFile<GoogleStoreShape>(
+  path.join(dataDir, 'google-accounts.enc.json'),
+  () => ({ accounts: {} }),
+  getEncryptionKey(dataDir),
+);
+const googleAccounts = new GoogleAccountService(googleStore, configFromEnv());
+const library = new ManagedLibrary(path.join(dataDir, 'library'));
+app.use('/api/google', createGoogleRouter({ accounts: googleAccounts, library }));
+app.use('/api/library', createLibraryRouter(library));
+
+// Extended AI, FileOps, eBay, and Plugin Architecture routers
+const aiService = new AiService(dataDir);
+const ebayService = new EbayService(dataDir);
+const pluginRegistry = new PluginRegistry(dataDir);
+app.use('/api', createExtendedApiRouter({ aiService, ebayService, pluginRegistry }));
 
 // 1. Health check & system diagnostics
 app.get('/api/health', (_req: Request, res: Response) => {
@@ -129,15 +155,8 @@ app.get('/api/drive/detect', (_req: Request, res: Response) => {
       } catch {}
     }
 
-    // Default detection fallback if in container
-    if (availableMounts.length === 0) {
-      availableMounts.push(
-        { path: 'P:\\My Drive', label: 'Google Drive Stream (P:\\My Drive)', type: 'drive_desktop' },
-        { path: 'F:\\Images', label: 'Computer Backup (F:\\Images)', type: 'computer_backup' },
-        { path: 'C:\\Users\\Seller\\My Drive', label: 'Google Drive Mirror (C:\\)', type: 'drive_mirror' }
-      );
-      detectedPath = 'P:\\My Drive';
-    }
+    // No fabricated defaults: if nothing is mounted, report an empty list and let the UI explain.
+    if (availableMounts.length === 0) detectedPath = '';
   } else if (platform === 'darwin') {
     // macOS CloudStorage
     const home = process.env.HOME || '/Users/seller';

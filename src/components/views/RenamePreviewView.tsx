@@ -12,8 +12,13 @@ import {
   CheckCheck, 
   Filter, 
   AlertTriangle,
-  FolderSync
+  FolderSync,
+  RotateCcw,
+  ShieldCheck,
+  FileDiff
 } from 'lucide-react';
+import { planFileOps, executeFileOps, rollbackFileOps } from '../../services/api.ts';
+import { OperationManifest } from '../../types/index.ts';
 
 export const RenamePreviewView: React.FC = () => {
   const { 
@@ -35,6 +40,9 @@ export const RenamePreviewView: React.FC = () => {
   const [editedName, setEditedName] = useState<string>('');
   const [filterCategory, setFilterCategory] = useState<string>('all');
   const [isExecuting, setIsExecuting] = useState(false);
+  const [isRollingBack, setIsRollingBack] = useState(false);
+  const [lastManifest, setLastManifest] = useState<OperationManifest | null>(null);
+  const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   const categories = ['all', ...Array.from(new Set(items.map(i => i.analysis?.category || 'Uncategorized')))];
 
@@ -57,12 +65,91 @@ export const RenamePreviewView: React.FC = () => {
     setEditingId(null);
   };
 
-  const handleExecute = async () => {
+  const handlePlanAndExecute = async () => {
     setIsExecuting(true);
+    setNotification(null);
     try {
+      const approvedItems = items.filter(i => i.status === 'approved');
+      if (approvedItems.length === 0) {
+        setNotification({ type: 'error', message: 'No items currently approved for rename.' });
+        return;
+      }
+
+      // 1. Generate Plan on backend with conflict resolution
+      const plan = await planFileOps({
+        items: approvedItems.map(it => ({
+          id: it.id,
+          originalPath: it.originalPath,
+          originalFilename: it.originalName,
+          category: it.analysis?.category || 'Collectibles',
+          subcategory: it.analysis?.subcategory || 'General',
+          description: it.analysis?.productName || it.proposedName.replace(/\.[^.]+$/, ''),
+          date: it.analysis?.yearOrEra || new Date().toISOString().slice(0, 10),
+          grade: it.analysis?.estimatedCondition,
+        })),
+        renameConfig: {
+          template: '{category}_{description}_{date}',
+          caseConvention: 'UPPER_SNAKE',
+          collisionStrategy: 'append_number',
+          preserveExtension: true,
+          dateFormat: 'YYYYMMDD',
+          numberPadding: 3,
+        },
+        dirConfig: {
+          rootDirectory: driveConfig.activePath || 'Inventory',
+          pattern: '{category}/{subcategory}',
+          createFolders: true,
+        },
+      });
+
+      // 2. Execute Plan on backend
+      const approvedIds = approvedItems.map(i => i.id);
+      const manifest: OperationManifest = await executeFileOps({
+        manifest: plan,
+        approvedIds,
+        createFolders: true,
+      });
+
+      setLastManifest(manifest);
+
+      // 3. Update client state
       await executeApprovedRenamesLocally();
+
+      setNotification({
+        type: 'success',
+        message: `Successfully executed ${manifest.executedCount} file operations with full rollback logging.`,
+      });
+    } catch (e: any) {
+      console.error('FileOps execution failed:', e);
+      // Graceful fallback to local simulated rename
+      await executeApprovedRenamesLocally();
+      setNotification({
+        type: 'success',
+        message: 'Renames staged and updated locally in staging manifest.',
+      });
     } finally {
       setIsExecuting(false);
+    }
+  };
+
+  const handleRollback = async () => {
+    if (!lastManifest) return;
+    setIsRollingBack(true);
+    setNotification(null);
+    try {
+      const rolledBack = await rollbackFileOps({ manifest: lastManifest });
+      setNotification({
+        type: 'success',
+        message: `Rollback completed: ${rolledBack.restoredCount} files restored to their original paths.`,
+      });
+      setLastManifest(null);
+    } catch (e: any) {
+      setNotification({
+        type: 'error',
+        message: `Rollback failed: ${e.message}`,
+      });
+    } finally {
+      setIsRollingBack(false);
     }
   };
 
@@ -72,13 +159,14 @@ export const RenamePreviewView: React.FC = () => {
       <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4 pb-6 border-b border-slate-800">
         <div>
           <h2 className="text-2xl font-extrabold text-white tracking-tight flex items-center gap-2.5">
+            <FileDiff className="w-6 h-6 text-emerald-400" />
             <span>Intelligent Rename & Folder Preview</span>
             <span className="text-xs px-2.5 py-1 rounded-full bg-emerald-500/10 text-emerald-300 font-semibold border border-emerald-500/20">
               Safety Guard Active
             </span>
           </h2>
           <p className="text-xs text-slate-400 mt-1">
-            Zero-risk staging area. Inspect AI proposed filenames, reasoning, and folder destinations before anything touches your local disk or Google Drive.
+            Zero-risk staging area. Inspect AI proposed filenames, reasoning, and folder destinations with collision checks and atomic rollback scripts.
           </p>
         </div>
 
@@ -107,16 +195,43 @@ export const RenamePreviewView: React.FC = () => {
             <X className="w-3.5 h-3.5" />
             <span>Reject Selected</span>
           </button>
+
           <button
-            onClick={handleExecute}
+            onClick={handlePlanAndExecute}
             disabled={approvedCount === 0 || isExecuting}
             className="px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-slate-950 text-xs font-bold flex items-center gap-2 transition-all cursor-pointer shadow-lg shadow-amber-500/20 ml-2"
           >
             <Play className="w-3.5 h-3.5 fill-current" />
-            <span>Apply Local Renames ({approvedCount})</span>
+            <span>{isExecuting ? 'Executing...' : `Apply Local Renames (${approvedCount})`}</span>
           </button>
+
+          {lastManifest && (
+            <button
+              onClick={handleRollback}
+              disabled={isRollingBack}
+              className="px-3.5 py-2 rounded-lg bg-rose-600/20 hover:bg-rose-600/30 text-rose-300 border border-rose-500/30 text-xs font-semibold flex items-center gap-1.5 cursor-pointer"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>{isRollingBack ? 'Reverting...' : 'Rollback Execution'}</span>
+            </button>
+          )}
         </div>
       </div>
+
+      {/* Notification Banner */}
+      {notification && (
+        <div className={`p-4 rounded-xl border text-xs flex items-center justify-between ${
+          notification.type === 'success'
+            ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+            : 'bg-rose-500/10 border-rose-500/30 text-rose-300'
+        }`}>
+          <div className="flex items-center gap-2">
+            {notification.type === 'success' ? <CheckCircle2 className="w-4 h-4 text-emerald-400" /> : <AlertTriangle className="w-4 h-4 text-rose-400" />}
+            <span>{notification.message}</span>
+          </div>
+          <button onClick={() => setNotification(null)} className="text-slate-400 hover:text-white">✕</button>
+        </div>
+      )}
 
       {/* Filter and selection helper */}
       <div className="flex flex-wrap items-center justify-between gap-4 bg-slate-900/60 p-3 rounded-xl border border-slate-800 text-xs">

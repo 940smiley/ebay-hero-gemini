@@ -7,9 +7,13 @@ import {
   FolderRule, 
   BatchProgress, 
   ScriptBundle, 
-  AuditRecord 
+  AuditRecord,
+  InventoryItemGroup,
+  ImageEditRevision,
+  DuplicateCandidate
 } from '../types/index.ts';
-import { INITIAL_SAMPLE_ITEMS } from '../utils/sampleData.ts';
+import { INITIAL_SAMPLE_ITEMS, INITIAL_SAMPLE_GROUPS } from '../utils/sampleData.ts';
+import { autoGroupInventoryItems, detectDuplicates } from '../lib/groupingAndDedup.ts';
 import { 
   initAuth, 
   googleSignIn, 
@@ -83,9 +87,31 @@ interface AppContextType {
   auditLogs: AuditRecord[];
   clearAuditLogs: () => void;
 
+  // Intelligent Item Grouping
+  itemGroups: InventoryItemGroup[];
+  setItemGroups: React.Dispatch<React.SetStateAction<InventoryItemGroup[]>>;
+  updateItemGroup: (id: string, updates: Partial<InventoryItemGroup>) => void;
+  deleteItemGroup: (id: string) => void;
+  createItemGroup: (title: string, category: string, imageIds: string[]) => InventoryItemGroup;
+  autoGroupAllItems: () => void;
+
+  // Deduplication
+  duplicateCandidates: DuplicateCandidate[];
+  refreshDuplicates: () => void;
+  resolveDuplicateCandidate: (id: string, action: 'merge' | 'keep_both' | 'assign_view' | 'discard') => void;
+
+  // Reversible Image Editor
+  editingImage: ImageItem | null;
+  setEditingImage: (item: ImageItem | null) => void;
+  saveImageRevision: (imageId: string, revision: ImageEditRevision) => void;
+
+  // Social Media Marketing
+  marketingModalItem: ImageItem | null;
+  setMarketingModalItem: (item: ImageItem | null) => void;
+
   // Active View Tab
-  activeTab: 'dashboard' | 'analyzer' | 'rename-preview' | 'folder-builder' | 'ebay-studio' | 'collectibles' | 'ai-chat' | 'sync-scripts' | 'database-schema' | 'settings';
-  setActiveTab: (tab: 'dashboard' | 'analyzer' | 'rename-preview' | 'folder-builder' | 'ebay-studio' | 'collectibles' | 'ai-chat' | 'sync-scripts' | 'database-schema' | 'settings') => void;
+  activeTab: 'dashboard' | 'analyzer' | 'grouping' | 'duplicates' | 'rename-preview' | 'folder-builder' | 'ebay-studio' | 'collectibles' | 'plugins' | 'ai-chat' | 'sync-scripts' | 'database-schema' | 'settings';
+  setActiveTab: (tab: 'dashboard' | 'analyzer' | 'grouping' | 'duplicates' | 'rename-preview' | 'folder-builder' | 'ebay-studio' | 'collectibles' | 'plugins' | 'ai-chat' | 'sync-scripts' | 'database-schema' | 'settings') => void;
 
   // Google Workspace Integrations
   googleUser: User | null;
@@ -182,6 +208,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     ];
   });
 
+  // Intelligent Item Groups
+  const [itemGroups, setItemGroups] = useState<InventoryItemGroup[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY + '_groups');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return INITIAL_SAMPLE_GROUPS;
+  });
+
+  // Duplicate candidates
+  const [duplicateCandidates, setDuplicateCandidates] = useState<DuplicateCandidate[]>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY + '_dups');
+      if (saved) return JSON.parse(saved);
+    } catch {}
+    return detectDuplicates(INITIAL_SAMPLE_ITEMS);
+  });
+
+  // Reversible Image Editor State
+  const [editingImage, setEditingImage] = useState<ImageItem | null>(null);
+
+  // Social Media Marketing Modal State
+  const [marketingModalItem, setMarketingModalItem] = useState<ImageItem | null>(null);
+
   // Sync to local storage
   useEffect(() => {
     try {
@@ -191,9 +241,124 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   useEffect(() => {
     try {
+      localStorage.setItem(STORAGE_KEY + '_groups', JSON.stringify(itemGroups));
+    } catch {}
+  }, [itemGroups]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY + '_dups', JSON.stringify(duplicateCandidates));
+    } catch {}
+  }, [duplicateCandidates]);
+
+  useEffect(() => {
+    try {
       localStorage.setItem(STORAGE_KEY + '_audit', JSON.stringify(auditLogs));
     } catch {}
   }, [auditLogs]);
+
+  // Methods for Item Groups
+  const updateItemGroup = (id: string, updates: Partial<InventoryItemGroup>) => {
+    setItemGroups(prev => prev.map(g => g.id === id ? { ...g, ...updates, updatedAt: new Date().toISOString() } : g));
+  };
+
+  const deleteItemGroup = (id: string) => {
+    setItemGroups(prev => prev.filter(g => g.id !== id));
+    // Clear groupId on items
+    setItems(prev => prev.map(it => it.groupId === id ? { ...it, groupId: undefined } : it));
+  };
+
+  const createItemGroup = (title: string, category: string, imageIds: string[]): InventoryItemGroup => {
+    const primaryId = imageIds[0] || '';
+    const newGroup: InventoryItemGroup = {
+      id: `group-manual-${Date.now()}`,
+      title,
+      category,
+      primaryImageId: primaryId,
+      imageAssignments: imageIds.map((id, idx) => ({
+        imageId: id,
+        role: idx === 0 ? 'front' : idx === 1 ? 'rear' : 'other',
+        order: idx,
+        includedInEbayDraft: true,
+      })),
+      confidenceScore: 100,
+      autoGrouped: false,
+      status: 'grouped',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    setItemGroups(prev => [newGroup, ...prev]);
+    setItems(prev => prev.map(it => imageIds.includes(it.id) ? { ...it, groupId: newGroup.id } : it));
+    return newGroup;
+  };
+
+  const autoGroupAllItems = () => {
+    const result = autoGroupInventoryItems(items, itemGroups);
+    setItemGroups(result.groups);
+    // Link items
+    const groupMap = new Map<string, string>();
+    for (const g of result.groups) {
+      for (const a of g.imageAssignments) {
+        groupMap.set(a.imageId, g.id);
+      }
+    }
+    setItems(prev => prev.map(it => groupMap.has(it.id) ? { ...it, groupId: groupMap.get(it.id) } : it));
+  };
+
+  // Methods for Duplicates
+  const refreshDuplicates = () => {
+    const dups = detectDuplicates(items);
+    setDuplicateCandidates(dups);
+  };
+
+  const resolveDuplicateCandidate = (id: string, action: 'merge' | 'keep_both' | 'assign_view' | 'discard') => {
+    const cand = duplicateCandidates.find(c => c.id === id);
+    if (!cand) return;
+
+    if (action === 'merge') {
+      // Point duplicate references to original and delete duplicate image
+      setItems(prev => prev.filter(it => it.id !== cand.duplicateImageId));
+    } else if (action === 'assign_view') {
+      // Find original's group and attach duplicate as an extra view
+      const origItem = items.find(it => it.id === cand.originalImageId);
+      if (origItem?.groupId) {
+        setItemGroups(prev => prev.map(g => {
+          if (g.id === origItem.groupId) {
+            return {
+              ...g,
+              imageAssignments: [
+                ...g.imageAssignments,
+                { imageId: cand.duplicateImageId, role: 'surface_detail', order: g.imageAssignments.length, includedInEbayDraft: false }
+              ]
+            };
+          }
+          return g;
+        }));
+      }
+    }
+
+    setDuplicateCandidates(prev => prev.map(c => c.id === id ? {
+      ...c,
+      status: action === 'merge' ? 'resolved_merged' :
+              action === 'keep_both' ? 'resolved_kept_both' :
+              action === 'assign_view' ? 'resolved_assigned_view' : 'resolved_discarded'
+    } : c));
+  };
+
+  // Method to save non-destructive image revision
+  const saveImageRevision = (imageId: string, revision: ImageEditRevision) => {
+    setItems(prev => prev.map(it => {
+      if (it.id === imageId) {
+        return {
+          ...it,
+          editRevision: revision,
+          updatedAt: new Date().toISOString(),
+        };
+      }
+      return it;
+    }));
+    setEditingImage(null);
+  };
 
   // Query server for local Drive auto-detection
   const detectDrivePaths = useCallback(async () => {
@@ -341,14 +506,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       updateItem(item.id, { status: 'analyzing' });
 
       try {
-        const response = await fetch('/api/analyze', {
+        const response = await fetch('/api/ai/analyze', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 
+            'Content-Type': 'application/json',
+            'X-Requested-With': 'ebay-hero'
+          },
           body: JSON.stringify({
             imageBase64: item.previewUrl,
             mimeType: item.mimeType,
             originalFilename: item.originalName,
-            model: aiSettings.geminiModel,
+            provider: aiSettings.provider,
+            model: aiSettings.provider === 'gemini' ? aiSettings.geminiModel : aiSettings.localModelName,
             enableThinking: aiSettings.enableThinking,
           }),
         });
@@ -646,6 +815,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         clearAuditLogs,
         activeTab,
         setActiveTab,
+        itemGroups,
+        setItemGroups,
+        updateItemGroup,
+        deleteItemGroup,
+        createItemGroup,
+        autoGroupAllItems,
+        duplicateCandidates,
+        refreshDuplicates,
+        resolveDuplicateCandidate,
+        editingImage,
+        setEditingImage,
+        saveImageRevision,
+        marketingModalItem,
+        setMarketingModalItem,
         googleUser,
         googleAccessToken,
         isGoogleSigningIn,

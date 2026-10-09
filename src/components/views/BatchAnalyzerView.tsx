@@ -121,27 +121,59 @@ export const BatchAnalyzerView: React.FC = () => {
 
         {/* Engine Settings Toolbar */}
         <div className="flex flex-wrap items-center gap-3 bg-slate-900 p-2 rounded-xl border border-slate-800">
+          {/* Provider Selector */}
           <div className="flex items-center gap-2 px-3 py-1 bg-slate-950 rounded-lg border border-slate-800 text-xs">
             <Brain className="w-3.5 h-3.5 text-amber-400" />
             <select
-              value={aiSettings.geminiModel}
-              onChange={(e) => updateAiSettings({ geminiModel: e.target.value as any })}
-              className="bg-transparent text-slate-200 font-medium focus:outline-none cursor-pointer"
+              value={aiSettings.provider}
+              onChange={(e) => updateAiSettings({ provider: e.target.value as any })}
+              className="bg-transparent text-slate-200 font-bold focus:outline-none cursor-pointer uppercase text-[11px]"
             >
-              <option value="gemini-3.8-flash" className="bg-slate-900 text-white">Gemini 3.8 Flash (Fast & Scalable)</option>
-              <option value="gemini-3.1-pro-preview" className="bg-slate-900 text-white">Gemini 3.1 Pro (Deep Reasoning)</option>
+              <option value="gemini" className="bg-slate-900 text-white">Google Gemini</option>
+              <option value="ollama" className="bg-slate-900 text-white">Ollama Local</option>
+              <option value="openai" className="bg-slate-900 text-white">OpenAI / Compatible</option>
             </select>
           </div>
 
-          <label className="flex items-center gap-2 text-xs text-slate-300 px-3 py-1 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={aiSettings.enableThinking}
-              onChange={(e) => updateAiSettings({ enableThinking: e.target.checked })}
-              className="rounded bg-slate-950 border-slate-700 text-amber-500 focus:ring-0"
-            />
-            <span>Thinking Mode</span>
-          </label>
+          {/* Gemini Model */}
+          {aiSettings.provider === 'gemini' && (
+            <>
+              <div className="flex items-center gap-2 px-3 py-1 bg-slate-950 rounded-lg border border-slate-800 text-xs">
+                <select
+                  value={aiSettings.geminiModel}
+                  onChange={(e) => updateAiSettings({ geminiModel: e.target.value as any })}
+                  className="bg-transparent text-slate-200 font-medium focus:outline-none cursor-pointer"
+                >
+                  <option value="gemini-3.8-flash" className="bg-slate-900 text-white">Gemini 3.8 Flash (Fast & Scalable)</option>
+                  <option value="gemini-3.1-pro-preview" className="bg-slate-900 text-white">Gemini 3.1 Pro (Deep Reasoning)</option>
+                </select>
+              </div>
+
+              <label className="flex items-center gap-2 text-xs text-slate-300 px-3 py-1 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={aiSettings.enableThinking}
+                  onChange={(e) => updateAiSettings({ enableThinking: e.target.checked })}
+                  className="rounded bg-slate-950 border-slate-700 text-amber-500 focus:ring-0"
+                />
+                <span>Thinking Mode</span>
+              </label>
+            </>
+          )}
+
+          {/* Local Provider Identifier */}
+          {aiSettings.provider !== 'gemini' && (
+            <div className="flex items-center gap-2 px-3 py-1 bg-slate-950 rounded-lg border border-slate-800 text-xs">
+              <span className="text-slate-400 text-[10px]">Model:</span>
+              <input
+                type="text"
+                value={aiSettings.localModelName}
+                onChange={(e) => updateAiSettings({ localModelName: e.target.value })}
+                placeholder="e.g. qwen2.5-vl:7b"
+                className="bg-transparent text-white font-mono text-xs w-32 focus:outline-none"
+              />
+            </div>
+          )}
 
           <div className="h-4 w-px bg-slate-800" />
 
@@ -373,14 +405,31 @@ export const BatchAnalyzerView: React.FC = () => {
               </div>
 
               {item.analysis && (
-                <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between text-[11px]">
-                  <span className="text-slate-400 truncate max-w-[120px]">
-                    {item.analysis.category}
-                  </span>
-                  {item.analysis.estimatedMarketValueUsd && (
-                    <span className="font-bold text-amber-400 font-mono">
-                      ${item.analysis.estimatedMarketValueUsd.median}
+                <div className="pt-2 border-t border-slate-800/80 space-y-1.5 text-[11px]">
+                  {item.analysis.estimatedCondition && (
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400">Condition:</span>
+                      <span className="font-bold text-emerald-400 text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20">
+                        {item.analysis.estimatedCondition}
+                      </span>
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-between">
+                    <span className="text-slate-400 truncate max-w-[120px]">
+                      {item.analysis.category}
                     </span>
+                    {item.analysis.estimatedMarketValueUsd && (
+                      <span className="font-bold text-amber-400 font-mono">
+                        ${item.analysis.estimatedMarketValueUsd.median}
+                      </span>
+                    )}
+                  </div>
+
+                  {item.analysis.ocrSummary && (
+                    <p className="text-[10px] text-slate-500 line-clamp-1 italic font-mono">
+                      OCR: {item.analysis.ocrSummary}
+                    </p>
                   )}
                 </div>
               )}

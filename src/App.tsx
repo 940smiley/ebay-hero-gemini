@@ -16,7 +16,12 @@ import { CollectiblesVaultView } from './components/views/CollectiblesVaultView.
 import { AiChatAssistantView } from './components/views/AiChatAssistantView.tsx';
 import { ScriptSyncHubView } from './components/views/ScriptSyncHubView.tsx';
 import { DatabaseSchemaView } from './components/views/DatabaseSchemaView.tsx';
+import { PluginsView } from './components/views/PluginsView.tsx';
 import { SettingsView } from './components/views/SettingsView.tsx';
+import { ItemGroupingView } from './components/views/ItemGroupingView.tsx';
+import { DuplicateReviewView } from './components/views/DuplicateReviewView.tsx';
+import { ImageEditorModal } from './components/editor/ImageEditorModal.tsx';
+import { SocialMediaModal } from './components/marketing/SocialMediaModal.tsx';
 import { AddPhotosModal } from './components/AddPhotosModal.tsx';
 
 const MainContent: React.FC = () => {
@@ -26,10 +31,13 @@ const MainContent: React.FC = () => {
     <main className="flex-1 overflow-y-auto bg-slate-950 text-slate-100">
       {activeTab === 'dashboard' && <DashboardView />}
       {activeTab === 'analyzer' && <BatchAnalyzerView />}
+      {activeTab === 'grouping' && <ItemGroupingView />}
+      {activeTab === 'duplicates' && <DuplicateReviewView />}
       {activeTab === 'rename-preview' && <RenamePreviewView />}
       {activeTab === 'folder-builder' && <FolderBuilderView />}
       {activeTab === 'ebay-studio' && <EbayStudioView />}
       {activeTab === 'collectibles' && <CollectiblesVaultView />}
+      {activeTab === 'plugins' && <PluginsView />}
       {activeTab === 'ai-chat' && <AiChatAssistantView />}
       {activeTab === 'sync-scripts' && <ScriptSyncHubView />}
       {activeTab === 'database-schema' && <DatabaseSchemaView />}
@@ -52,6 +60,8 @@ const MainLayout: React.FC = () => {
         isOpen={isCloudPickerOpen}
         onClose={() => setIsCloudPickerOpen(false)}
       />
+      <ImageEditorModal />
+      <SocialMediaModal />
     </div>
   );
 };

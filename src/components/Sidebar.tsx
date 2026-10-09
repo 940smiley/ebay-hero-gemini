@@ -14,19 +14,33 @@ import {
   FolderGit2,
   HardDriveDownload,
   ShieldCheck,
-  Plus
+  Plus,
+  Boxes,
+  Layers,
+  Copy
 } from 'lucide-react';
 
 export const Sidebar: React.FC = () => {
-  const { activeTab, setActiveTab, items, driveConfig, openDrivePickerForImport } = useApp();
+  const { 
+    activeTab, 
+    setActiveTab, 
+    items, 
+    itemGroups, 
+    duplicateCandidates, 
+    driveConfig, 
+    openDrivePickerForImport 
+  } = useApp();
 
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, badge: null },
     { id: 'analyzer', label: 'Batch Photo Analyzer', icon: ScanSearch, badge: items.filter(i => i.status === 'pending').length || null },
+    { id: 'grouping', label: 'Item Grouping & Roles', icon: Layers, badge: itemGroups.length || null },
+    { id: 'duplicates', label: 'Duplicate Review', icon: Copy, badge: duplicateCandidates.filter(c => c.status === 'pending').length || null },
     { id: 'rename-preview', label: 'Rename & Diff Preview', icon: FileDiff, badge: items.filter(i => i.status === 'approved').length || null },
     { id: 'folder-builder', label: 'Directory Builder', icon: FolderTree, badge: null },
     { id: 'ebay-studio', label: 'eBay Listing Studio', icon: ShoppingBag, badge: items.filter(i => i.ebayDraft).length || null },
     { id: 'collectibles', label: 'Collectibles Vault', icon: Trophy, badge: null },
+    { id: 'plugins', label: 'Specialty Plugins', icon: Boxes, badge: 'v1.0' },
     { id: 'ai-chat', label: 'Gemini Appraiser Chat', icon: MessageSquareCode, badge: 'AI' },
     { id: 'sync-scripts', label: 'Script & Drive Sync Hub', icon: Terminal, badge: null },
     { id: 'database-schema', label: 'Enterprise Schema (SQL)', icon: Database, badge: null },
