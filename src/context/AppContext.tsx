@@ -12,6 +12,7 @@ import {
   ImageEditRevision,
   DuplicateCandidate
 } from '../types/index.ts';
+import { logger } from '../services/logger.ts';
 import { INITIAL_SAMPLE_ITEMS, INITIAL_SAMPLE_GROUPS } from '../utils/sampleData.ts';
 import { autoGroupInventoryItems, detectDuplicates } from '../lib/groupingAndDedup.ts';
 import { 
@@ -391,7 +392,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const addItems = (newItems: ImageItem[]) => {
-    setItems(prev => [...newItems, ...prev]);
+    setItems(prev => {
+      const merged = [...newItems, ...prev];
+      setTimeout(() => {
+        setDuplicateCandidates(detectDuplicates(merged));
+      }, 50);
+      return merged;
+    });
     setSelectedIds(prev => {
       const next = new Set(prev);
       newItems.forEach(i => next.add(i.id));
@@ -506,6 +513,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       updateItem(item.id, { status: 'analyzing' });
 
       try {
+        let base64ToSend = item.previewUrl || '';
+        // If previewUrl is a blob URL (from local file picker), read blob as base64 in browser
+        if (base64ToSend.startsWith('blob:')) {
+          try {
+            const blobRes = await fetch(base64ToSend);
+            const blobData = await blobRes.blob();
+            base64ToSend = await new Promise<string>((resolve, reject) => {
+              const reader = new FileReader();
+              reader.onloadend = () => resolve(reader.result as string);
+              reader.onerror = reject;
+              reader.readAsDataURL(blobData);
+            });
+          } catch (e) {
+            console.warn('Could not read blob as base64 data URL:', e);
+          }
+        }
+
+        const opId = logger.generateId('batch-ai');
+        logger.info('Gemini Vision', 'batch_analyze_item_start', `Analyzing item ${item.originalName} (${i + 1}/${unanalyzed.length})`, {
+          operationId: opId,
+          details: { itemId: item.id, mimeType: item.mimeType },
+        });
+
+        const assetId = item.id.replace(/^(drive|photos)-/, '');
+
         const response = await fetch('/api/ai/analyze', {
           method: 'POST',
           headers: { 
@@ -513,7 +545,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             'X-Requested-With': 'ebay-hero'
           },
           body: JSON.stringify({
-            imageBase64: item.previewUrl,
+            imageBase64: base64ToSend,
+            assetId,
             mimeType: item.mimeType,
             originalFilename: item.originalName,
             provider: aiSettings.provider,
@@ -524,13 +557,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
         if (response.ok) {
           const analysis = await response.json();
+          const proposedName = analysis.proposedFilename || analysis.suggestedFilename || item.originalName;
+          const proposedFolder = analysis.proposedRelativeFolder || analysis.suggestedFolder || 'Inventory/Collectibles';
+
           updateItem(item.id, {
             status: 'approved',
-            confidence: analysis.confidenceScore || 90,
-            proposedName: analysis.proposedFilename || item.originalName,
-            proposedFolder: analysis.proposedRelativeFolder || 'Inventory/Collectibles',
+            confidence: analysis.confidenceScore || 85,
+            proposedName,
+            proposedFolder,
             analysis,
             ebayDraft: analysis.ebayDraft,
+          });
+
+          logger.info('Gemini Vision', 'batch_analyze_item_success', `Analysis succeeded for ${item.originalName}`, {
+            operationId: opId,
+            details: {
+              category: analysis.category,
+              proposedName,
+              hasEbayDraft: Boolean(analysis.ebayDraft),
+            },
           });
 
           setBatchProgress(prev => ({
@@ -545,18 +590,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               action: 'analyze',
               imageId: item.id,
               originalName: item.originalName,
-              newName: analysis.proposedFilename || item.originalName,
+              newName: proposedName,
               originalPath: item.originalPath,
-              newPath: analysis.proposedRelativeFolder || 'Inventory/Collectibles',
+              newPath: proposedFolder,
               status: 'success',
               performedBy: `Gemini Vision (${aiSettings.geminiModel})`,
             },
             ...prev,
           ]);
         } else {
-          throw new Error(`Server returned ${response.status}`);
+          const errData = await response.json().catch(() => ({}));
+          throw new Error(errData.error || `Server returned HTTP ${response.status}`);
         }
       } catch (err: any) {
+        logger.error('Gemini Vision', 'batch_analyze_item_failed', `Failed analyzing ${item.originalName}: ${err.message}`, {
+          details: { error: err.message, itemId: item.id },
+        });
+
         updateItem(item.id, {
           status: 'error',
           errorMessage: err.message || 'Analysis failed',

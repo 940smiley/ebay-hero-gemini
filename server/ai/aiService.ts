@@ -97,10 +97,41 @@ export class AiService {
       const base = path.basename(originalFilename, ext);
       res.suggestedFilename = `${base.toUpperCase()}_001${ext}`;
     }
+    res.proposedFilename = res.proposedFilename || res.suggestedFilename;
+    res.suggestedFilename = res.suggestedFilename || res.proposedFilename;
+
+    if (!res.suggestedFolder) {
+      res.suggestedFolder = `${res.category}/${res.subcategory}`;
+    }
+    res.proposedRelativeFolder = res.proposedRelativeFolder || res.suggestedFolder;
+    res.suggestedFolder = res.suggestedFolder || res.proposedRelativeFolder;
+
     if (typeof res.confidenceScore !== 'number') res.confidenceScore = 75;
     if (!Array.isArray(res.visibleText)) res.visibleText = [];
     if (!Array.isArray(res.suggestedTags)) res.suggestedTags = [];
     if (!res.estimatedCondition) res.estimatedCondition = 'Near Mint (NM 7)';
+
+    if (!res.ebayDraft) {
+      const title = `${res.category} ${res.productName || 'Collectible'} ${res.estimatedCondition || ''}`.trim().slice(0, 80);
+      res.ebayDraft = {
+        title,
+        subtitle: `${res.estimatedCondition || 'High Quality'} - Authentic Item`,
+        primaryCategoryId: '183437',
+        primaryCategoryName: res.category || 'Collectibles',
+        conditionDescriptor: res.estimatedCondition || 'Used / Very Good',
+        itemSpecifics: {
+          Brand: res.manufacturerOrBrand || 'Unbranded',
+          Type: res.primaryObject || 'Collectible',
+          Category: res.category || 'Collectibles',
+        },
+        suggestedPriceBin: res.estimatedMarketValueUsd?.median || 19.99,
+        suggestedStartingBid: res.estimatedMarketValueUsd?.low || 9.99,
+        shippingPreset: 'USPS Ground Advantage Bubble Mailer + Top Loader',
+        descriptionHtml: `<div><h3>${title}</h3><p>Item: ${res.productName || 'Collectible'}</p><p>Condition: ${res.estimatedCondition || 'Near Mint'}</p></div>`,
+      };
+    } else if (res.ebayDraft.title && res.ebayDraft.title.length > 80) {
+      res.ebayDraft.title = res.ebayDraft.title.slice(0, 80);
+    }
   }
 
   private generateFallbackAnalysis(originalFilename: string): StructuredImageAnalysis {
@@ -111,6 +142,9 @@ export class AiService {
 
     const category = isCard ? 'Trading Cards' : isStamp ? 'Stamps' : 'Collectibles';
     const subcategory = isCard ? 'Sports Cards' : isStamp ? 'United States' : 'General';
+    const suggestedFolder = `${category}/${subcategory}`;
+    const suggestedFilename = `${category.toUpperCase()}_${base.toUpperCase().replace(/\s+/g, '_')}_001${ext}`;
+    const title = `${category} ${base.replace(/[_-]+/g, ' ')}`.slice(0, 80);
 
     return {
       imageDescription: `Visual analysis of ${originalFilename}.`,
@@ -130,8 +164,10 @@ export class AiService {
       estimatedCondition: 'Near Mint (NM 7)',
       suggestedTags: [category, subcategory, 'Vintage', 'Collectibles'],
       suggestedCollection: category,
-      suggestedFolder: `${category}/${subcategory}`,
-      suggestedFilename: `${category.toUpperCase()}_${base.toUpperCase().replace(/\s+/g, '_')}_001${ext}`,
+      suggestedFolder,
+      suggestedFilename,
+      proposedFilename: suggestedFilename,
+      proposedRelativeFolder: suggestedFolder,
       confidenceScore: 70,
       reasoning: 'Generated from verifiable file markers. Connect Gemini API Key for multimodal neural appraising.',
       isUnverified: true,
@@ -139,6 +175,21 @@ export class AiService {
         low: 5.0,
         median: 12.0,
         high: 25.0,
+      },
+      ebayDraft: {
+        title,
+        subtitle: 'Authentic Collectible Item',
+        primaryCategoryId: '183437',
+        primaryCategoryName: category,
+        conditionDescriptor: 'Near Mint (NM 7)',
+        itemSpecifics: {
+          Brand: isCard ? 'Topps' : isStamp ? 'USPS' : 'Unknown',
+          Type: isCard ? 'Trading Card' : isStamp ? 'Stamp' : 'Collectible',
+        },
+        suggestedPriceBin: 19.99,
+        suggestedStartingBid: 9.99,
+        shippingPreset: 'USPS Ground Advantage Bubble Mailer + Top Loader',
+        descriptionHtml: `<div><h3>${title}</h3><p>Condition: Near Mint (NM 7)</p></div>`,
       },
     };
   }

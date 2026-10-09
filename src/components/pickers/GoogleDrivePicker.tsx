@@ -18,7 +18,8 @@ import {
   X,
   FileQuestion,
   CornerDownRight,
-  ShieldAlert
+  ShieldAlert,
+  Image as ImageIcon
 } from 'lucide-react';
 import { apiRequest, streamNdjson } from '../../services/api.ts';
 import { 
@@ -34,6 +35,7 @@ import {
   serialize 
 } from '../../lib/selection.ts';
 import { ImageItem } from '../../types/index.ts';
+import { logger } from '../../services/logger.ts';
 
 interface DriveFolder {
   id: string;
@@ -453,10 +455,17 @@ export const GoogleDrivePicker: React.FC<GoogleDrivePickerProps> = ({ onImportCo
                         className="w-full h-full object-cover"
                         loading="lazy"
                         onError={(e) => {
-                          // Fallback icon if no thumbnail preview is returned by Drive
-                          (e.target as HTMLElement).style.display = 'none';
+                          const target = e.currentTarget;
+                          target.style.display = 'none';
+                          const fallback = target.parentElement?.querySelector('.thumb-fallback');
+                          if (fallback) (fallback as HTMLElement).style.display = 'flex';
+                          logger.debug('Google Drive', 'thumbnail_load_fallback', `Drive thumbnail fallback for ${img.name} (${img.id})`);
                         }}
                       />
+                      <div className="thumb-fallback hidden flex-col items-center justify-center p-2 text-center text-slate-500">
+                        <ImageIcon className="w-8 h-8 opacity-40 mb-1" />
+                        <span className="text-[9px] truncate max-w-[80px]">{img.name}</span>
+                      </div>
                       <div className="absolute top-2 left-2">
                         <div className={`w-5 h-5 rounded flex items-center justify-center ${
                           selected ? 'bg-blue-600 text-white shadow-md' : 'bg-slate-950/80 border border-slate-700 text-transparent'

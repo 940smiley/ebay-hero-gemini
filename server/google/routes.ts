@@ -6,6 +6,7 @@ import { DriveClient, DriveScope } from './drive.ts';
 import { PhotosPickerClient, PickedPhoto } from './photosPicker.ts';
 import { resolveDriveSelection, summarizeDriveSelection } from './selectionResolver.ts';
 import { ImageRejectedError, ManagedLibrary } from '../library.ts';
+import { serverLogger } from '../logger.ts';
 import type { SerializedSelection } from '../../src/lib/selection.ts';
 
 export interface GoogleRouterDeps {
@@ -150,7 +151,13 @@ ${ok ? 'setTimeout(function(){window.close()},800)' : ''}</script></body>`);
 
   router.get('/drive/thumb/:id', wrap(async (req, res) => {
     const size = Number(req.query.size) || 256;
-    const upstream = await (await drive()).thumbnail(req.params.id, size);
+    const client = await drive();
+    let upstream = await client.thumbnail(req.params.id, size);
+    if (!upstream) {
+      try {
+        upstream = await client.download(req.params.id);
+      } catch {}
+    }
     if (!upstream) { res.status(404).json({ error: 'No thumbnail available from Drive for this file.' }); return; }
     res.setHeader('Content-Type', upstream.headers.get('content-type') ?? 'image/jpeg');
     res.setHeader('Cache-Control', 'private, max-age=300');
@@ -242,6 +249,7 @@ ${ok ? 'setTimeout(function(){window.close()},800)' : ''}</script></body>`);
   router.post('/photos/session/:id/import', wrap(async (req, res) => {
     const client = await photos();
     const account = activeId();
+    const opId = (req.headers['x-operation-id'] as string) || (req.body?.operationId as string) || serverLogger.generateId('photos-imp');
     const only = Array.isArray(req.body?.itemIds) ? new Set<string>(req.body.itemIds) : null;
     const items = (await getPickerItems(client, req.params.id, true)).filter((m) => !only || only.has(m.id));
     const ac = new AbortController();
@@ -250,22 +258,51 @@ ${ok ? 'setTimeout(function(){window.close()},800)' : ''}</script></body>`);
     res.setHeader('Cache-Control', 'no-store');
     const send = (o: unknown) => res.write(JSON.stringify(o) + '\n');
     const stats = { imported: 0, duplicates: 0, skipped: 0, failed: 0 };
-    send({ type: 'start', total: items.length });
+    serverLogger.info('Google Photos', 'import_start', `Starting import for session ${req.params.id} (${items.length} items)`, { operationId: opId, details: { sessionId: req.params.id, count: items.length } });
+    send({ type: 'start', total: items.length, opId });
     for (const m of items) {
-      if (ac.signal.aborted) break;
+      if (ac.signal.aborted) {
+        serverLogger.warn('Google Photos', 'import_aborted', 'Client aborted import connection mid-stream', { operationId: opId, details: { sessionId: req.params.id } });
+        break;
+      }
       const name = m.filename ?? `google-photos-${m.id.slice(0, 8)}`;
-      if (m.type !== 'PHOTO') { stats.skipped++; send({ type: 'skip', id: m.id, name, reason: `${m.type} items are not imported` }); continue; }
+      if (m.type !== 'PHOTO') {
+        stats.skipped++;
+        serverLogger.debug('Google Photos', 'import_skipped_type', `Skipped non-photo item: ${m.type}`, { operationId: opId, details: { id: m.id, type: m.type } });
+        send({ type: 'skip', id: m.id, name, reason: `${m.type} items are not imported` });
+        continue;
+      }
       try {
         const dl = await client.fetchMedia(m.baseUrl, 'original');
         const { record, duplicate } = await library.ingest(dl.body as never, name, { type: 'google_photos', mediaItemId: m.id, account, createTime: m.createTime });
         duplicate ? stats.duplicates++ : stats.imported++;
+        serverLogger.info('Google Photos', 'import_item_success', `Ingested photo ${name} (id: ${record.id}, duplicate: ${duplicate})`, {
+          operationId: opId,
+          details: {
+            mediaItemId: m.id,
+            libraryId: record.id,
+            duplicate,
+            size: record.size,
+          },
+        });
         send({ type: 'item', sourceId: m.id, duplicate, filenameFromGoogle: Boolean(m.filename), item: publicRecord(record) });
       } catch (e) {
         stats.failed++;
-        send({ type: 'error', id: m.id, name, retryable: !(e instanceof ImageRejectedError), message: e instanceof Error ? e.message : String(e) });
+        const message = e instanceof Error ? e.message : String(e);
+        const code = e instanceof GoogleApiError ? e.reason : e instanceof ImageRejectedError ? e.code : 'download_error';
+        serverLogger.error('Google Photos', 'import_item_error', `Failed importing photo ${name}: ${message}`, {
+          operationId: opId,
+          details: {
+            mediaItemId: m.id,
+            code,
+            error: message,
+          },
+        });
+        send({ type: 'error', id: m.id, name, retryable: !(e instanceof ImageRejectedError), message, code, opId });
       }
     }
-    send({ type: 'done', cancelled: ac.signal.aborted, ...stats });
+    serverLogger.info('Google Photos', 'import_complete', `Import completed. Imported: ${stats.imported}, Dups: ${stats.duplicates}, Failed: ${stats.failed}`, { operationId: opId, details: { stats } });
+    send({ type: 'done', cancelled: ac.signal.aborted, opId, ...stats });
     res.end();
   }));
 
@@ -300,19 +337,135 @@ ${ok ? 'setTimeout(function(){window.close()},800)' : ''}</script></body>`);
 
 export function createLibraryRouter(library: ManagedLibrary): Router {
   const router = express.Router();
+
+  // List all ingested records in the library
+  router.get('/', (_req, res) => {
+    const records = library.list().map(publicRecord);
+    res.json({ items: records, total: records.length });
+  });
+
   router.get('/:id', (req, res) => {
     const rec = library.get(req.params.id);
-    if (!rec) { res.status(404).json({ error: 'Not found' }); return; }
+    if (!rec) { res.status(404).json({ error: 'Library record not found' }); return; }
     res.json(publicRecord(rec));
   });
+
   router.get('/:id/file', (req, res) => {
     const rec = library.get(req.params.id);
-    if (!rec) { res.status(404).json({ error: 'Not found' }); return; }
-    res.setHeader('Content-Type', rec.mimeType);
+    if (!rec) { res.status(404).json({ error: 'Library record not found' }); return; }
+    const fPath = library.filePath(rec);
+    if (!fs.existsSync(fPath)) {
+      res.status(404).json({ error: 'File data missing from disk', id: rec.id });
+      return;
+    }
+    const stat = fs.statSync(fPath);
+    res.setHeader('Content-Type', rec.mimeType || 'application/octet-stream');
+    res.setHeader('Content-Length', stat.size);
+    res.setHeader('Accept-Ranges', 'bytes');
+    res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Cache-Control', 'private, max-age=3600');
-    fs.createReadStream(library.filePath(rec)).pipe(res);
+    const stream = fs.createReadStream(fPath);
+    stream.on('error', (err) => {
+      console.error('[library] stream error:', err);
+      if (!res.headersSent) res.status(500).end();
+    });
+    stream.pipe(res);
   });
+
+  // Upload a single file into the managed asset library
+  router.post('/upload', async (req: Request, res: Response) => {
+    const opId = (req.headers['x-operation-id'] as string) || serverLogger.generateId('upload');
+    try {
+      const filename = req.body?.filename || req.body?.originalFilename || 'upload.jpg';
+      const dataBase64 = req.body?.dataBase64 || req.body?.imageBase64;
+      const relativePath = req.body?.relativePath || filename;
+      if (!dataBase64) {
+        res.status(400).json({ error: 'Missing dataBase64 or imageBase64 payload' });
+        return;
+      }
+      const raw = dataBase64.includes(',') ? dataBase64.split(',')[1] : dataBase64;
+      const buffer = Buffer.from(raw, 'base64');
+      const { record, duplicate } = await library.ingest(buffer, filename, {
+        type: 'local_upload',
+        relativePath,
+        lastModified: req.body?.lastModified || Date.now(),
+      });
+      serverLogger.info('Managed Library', 'local_upload_success', `Ingested local file: ${filename} (ID: ${record.id}, duplicate: ${duplicate})`, {
+        operationId: opId,
+        details: {
+          filename,
+          size: record.size,
+          duplicate,
+        },
+      });
+      res.json({ item: publicRecord(record), duplicate });
+    } catch (err: any) {
+      serverLogger.error('Managed Library', 'local_upload_error', err.message || 'Upload failed', {
+        operationId: opId,
+        details: {
+          filename: req.body?.filename,
+          code: err instanceof ImageRejectedError ? err.code : undefined,
+        },
+      });
+      res.status(err instanceof ImageRejectedError ? 400 : 500).json({
+        error: err.message || 'Upload failed',
+        code: err instanceof ImageRejectedError ? err.code : 'upload_failed',
+      });
+    }
+  });
+
+  // Batch upload multiple files into the managed asset library
+  router.post('/upload/batch', async (req: Request, res: Response) => {
+    const opId = (req.headers['x-operation-id'] as string) || serverLogger.generateId('batch-up');
+    try {
+      const files = req.body?.files;
+      if (!Array.isArray(files) || files.length === 0) {
+        res.status(400).json({ error: 'Missing files array in request body' });
+        return;
+      }
+      const results: Array<{ item?: ReturnType<typeof publicRecord>; duplicate?: boolean; error?: string; filename: string }> = [];
+      for (const file of files) {
+        const filename = file.filename || file.originalFilename || 'upload.jpg';
+        const dataBase64 = file.dataBase64 || file.imageBase64;
+        const relativePath = file.relativePath || filename;
+        if (!dataBase64) {
+          results.push({ error: 'Missing image data', filename });
+          continue;
+        }
+        try {
+          const raw = dataBase64.includes(',') ? dataBase64.split(',')[1] : dataBase64;
+          const buffer = Buffer.from(raw, 'base64');
+          const { record, duplicate } = await library.ingest(buffer, filename, {
+            type: 'local_upload',
+            relativePath,
+            lastModified: file.lastModified || Date.now(),
+          });
+          results.push({ item: publicRecord(record), duplicate, filename });
+        } catch (err: any) {
+          results.push({
+            error: err.message || 'Upload failed',
+            filename,
+          });
+        }
+      }
+      serverLogger.info('Managed Library', 'batch_upload_complete', `Batch uploaded ${results.length} files`, { operationId: opId, details: { count: results.length } });
+      res.json({ results });
+    } catch (err: any) {
+      serverLogger.error('Managed Library', 'batch_upload_error', err.message || 'Batch upload failed', { operationId: opId });
+      res.status(500).json({ error: err.message || 'Batch upload failed' });
+    }
+  });
+
+  router.delete('/:id', (req, res) => {
+    const deleted = library.delete(req.params.id);
+    if (!deleted) {
+      res.status(404).json({ error: 'Library record not found' });
+      return;
+    }
+    res.json({ deleted: true, id: req.params.id });
+  });
+
   return router;
 }
 
@@ -322,3 +475,4 @@ export function publicRecord(r: ReturnType<ManagedLibrary['list']>[number]) {
     importedAt: r.importedAt, source: r.source, url: `/api/library/${r.id}/file`,
   };
 }
+

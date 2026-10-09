@@ -43,7 +43,7 @@ app.use('/api/library', createLibraryRouter(library));
 const aiService = new AiService(dataDir);
 const ebayService = new EbayService(dataDir);
 const pluginRegistry = new PluginRegistry(dataDir);
-app.use('/api', createExtendedApiRouter({ aiService, ebayService, pluginRegistry }));
+app.use('/api', createExtendedApiRouter({ aiService, ebayService, pluginRegistry, library, googleAccounts }));
 
 // 1. Health check & system diagnostics
 app.get('/api/health', (_req: Request, res: Response) => {

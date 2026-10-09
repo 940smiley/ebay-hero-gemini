@@ -16,6 +16,8 @@ import {
 } from 'lucide-react';
 import { GoogleConnectionsView } from '../google/GoogleConnectionsView.tsx';
 import { EbayConnectionCard } from '../ebay/EbayConnectionCard.tsx';
+import { DiagnosticHealthCheck } from '../diagnostics/DiagnosticHealthCheck.tsx';
+import { DiagnosticConsole } from '../diagnostics/DiagnosticConsole.tsx';
 
 export const SettingsView: React.FC = () => {
   const { 
@@ -261,6 +263,12 @@ export const SettingsView: React.FC = () => {
             </div>
           </div>
         </div>
+
+        {/* 4. Diagnostic Health Checks Suite */}
+        <DiagnosticHealthCheck />
+
+        {/* 5. Real-Time Diagnostic & Developer Console */}
+        <DiagnosticConsole />
       </div>
     </div>
   );
