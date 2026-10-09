@@ -217,7 +217,7 @@ ${ok ? 'setTimeout(function(){window.close()},800)' : ''}</script></body>`);
         const items = await getPickerItems(client, req.params.id, true);
         itemCount = items.length;
       } catch (e) {
-        console.warn(`[photos] Could not preload item count for session ${req.params.id}:`, e);
+        console.warn('[photos] Could not preload item count for session %s:', req.params.id, e);
       }
     }
     res.json({ ...session, itemCount });
