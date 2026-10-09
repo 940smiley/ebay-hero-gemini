@@ -103,11 +103,12 @@ class ServerDiagnosticLogger {
       this.buffer.shift();
     }
 
-    const logLine = `[${entry.timestamp}] [${level}] [${subsystem}] ${event}: ${message}`;
+    const logLine = `[${entry.timestamp}] [${level}] [${subsystem}] ${event}: ${entry.message}`;
+    const detailsText = entry.details ? JSON.stringify(entry.details) : '';
     if (level === 'ERROR') {
-      console.error(logLine, entry.details ? JSON.stringify(entry.details) : '');
+      console.error('%s %s', logLine, detailsText);
     } else if (level === 'WARN') {
-      console.warn(logLine, entry.details ? JSON.stringify(entry.details) : '');
+      console.warn('%s %s', logLine, detailsText);
     } else {
       console.log(logLine);
     }
