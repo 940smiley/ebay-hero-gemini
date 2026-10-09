@@ -280,8 +280,8 @@ Feel free to attach an image or ask any question!`,
             title="Attach a card from catalog for appraisal"
           >
             <option value="">Attach Item...</option>
-            {items.map((it) => (
-              <option key={it.id} value={it.id} className="bg-slate-900">
+            {items.map((it, idx) => (
+              <option key={`${it.id}-${idx}`} value={it.id} className="bg-slate-900">
                 {it.proposedName}
               </option>
             ))}

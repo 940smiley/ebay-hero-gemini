@@ -398,9 +398,9 @@ export const EbayStudioView: React.FC = () => {
 
         {/* Thumbnail carousel */}
         <div className="flex items-center gap-2 overflow-x-auto pb-1 max-w-full md:max-w-xl">
-          {items.map((it) => (
+          {items.map((it, itIdx) => (
             <button
-              key={it.id}
+              key={`${it.id}-${itIdx}`}
               onClick={() => setSelectedItemId(it.id)}
               className={`w-12 h-14 rounded-lg overflow-hidden border flex-shrink-0 relative transition-all cursor-pointer ${
                 it.id === selectedItem.id
@@ -513,7 +513,7 @@ export const EbayStudioView: React.FC = () => {
                     </div>
 
                     <div className="grid grid-cols-4 gap-2">
-                      {attachedPhotos.map(p => {
+                      {attachedPhotos.map((p, pIdx) => {
                         const item = p.item!;
                         const isMain = currentGroup?.primaryImageId === item.id;
                         const isSelected = item.id === selectedItem.id;
@@ -521,7 +521,7 @@ export const EbayStudioView: React.FC = () => {
 
                         return (
                           <div 
-                            key={item.id}
+                            key={`${item.id}-${pIdx}`}
                             className={`rounded-lg border p-1.5 bg-slate-950 flex flex-col justify-between space-y-1.5 transition-all relative ${
                               isSelected ? 'border-amber-500 ring-1 ring-amber-500/40' : 'border-slate-800'
                             }`}

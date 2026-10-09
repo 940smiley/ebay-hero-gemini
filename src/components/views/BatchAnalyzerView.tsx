@@ -327,9 +327,9 @@ export const BatchAnalyzerView: React.FC = () => {
 
       {/* Grid of photos */}
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-5">
-        {items.map((item) => (
+        {items.map((item, idx) => (
           <div
-            key={item.id}
+            key={`${item.id}-${idx}`}
             className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden hover:border-slate-700 transition-all flex flex-col group relative"
           >
             {/* Image Thumbnail */}

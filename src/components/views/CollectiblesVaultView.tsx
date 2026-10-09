@@ -99,13 +99,13 @@ export const CollectiblesVaultView: React.FC = () => {
 
       {/* Grid of Collectibles with Slab / Condition Badges */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {filteredItems.map((item) => {
+        {filteredItems.map((item, idx) => {
           const analysis = item.analysis;
           const grading = analysis?.gradingDetails;
 
           return (
             <div
-              key={item.id}
+              key={`${item.id}-${idx}`}
               className="bg-slate-900 border border-slate-800 rounded-2xl overflow-hidden hover:border-slate-700 transition-all flex flex-col group shadow-lg"
             >
               {/* Photo & Slab Visual Header */}

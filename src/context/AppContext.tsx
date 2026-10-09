@@ -131,11 +131,28 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 
 const STORAGE_KEY = 'ebay_hero_gemini_state_v1';
 
+const deduplicateItems = (rawItems: ImageItem[]): ImageItem[] => {
+  const seen = new Set<string>();
+  const clean: ImageItem[] = [];
+  for (const item of rawItems) {
+    if (item && item.id && !seen.has(item.id)) {
+      seen.add(item.id);
+      clean.push(item);
+    }
+  }
+  return clean;
+};
+
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [items, setItems] = useState<ImageItem[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY + '_items');
-      if (saved) return JSON.parse(saved);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) {
+          return deduplicateItems(parsed);
+        }
+      }
     } catch (e) {
       console.warn('Could not restore cached items:', e);
     }
@@ -387,13 +404,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const selectedItem = items.find(i => i.id === selectedItemId) || null;
 
   const addItem = (item: ImageItem) => {
-    setItems(prev => [item, ...prev]);
+    if (!item || !item.id) return;
+    setItems(prev => {
+      const idx = prev.findIndex(i => i.id === item.id);
+      if (idx !== -1) {
+        const next = [...prev];
+        next[idx] = { ...next[idx], ...item };
+        return next;
+      }
+      return [item, ...prev];
+    });
     setSelectedIds(prev => new Set([...prev, item.id]));
   };
 
   const addItems = (newItems: ImageItem[]) => {
     setItems(prev => {
-      const merged = [...newItems, ...prev];
+      const map = new Map<string, ImageItem>();
+      // Preserve existing items first
+      for (const item of prev) {
+        if (item && item.id) map.set(item.id, item);
+      }
+      // Upsert new items
+      for (const item of newItems) {
+        if (item && item.id) map.set(item.id, item);
+      }
+      const merged = Array.from(map.values());
       setTimeout(() => {
         setDuplicateCandidates(detectDuplicates(merged));
       }, 50);
@@ -401,7 +436,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
     setSelectedIds(prev => {
       const next = new Set(prev);
-      newItems.forEach(i => next.add(i.id));
+      newItems.forEach(i => {
+        if (i && i.id) next.add(i.id);
+      });
       return next;
     });
   };

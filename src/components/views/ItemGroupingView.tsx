@@ -274,7 +274,7 @@ export const ItemGroupingView: React.FC = () => {
 
                   {/* Group Photos Carousel / Grid */}
                   <div className="p-6 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                    {group.imageAssignments.map(assignment => {
+                    {group.imageAssignments.map((assignment, aIdx) => {
                       const image = items.find(i => i.id === assignment.imageId);
                       if (!image) return null;
                       const isPrimary = group.primaryImageId === image.id;
@@ -282,7 +282,7 @@ export const ItemGroupingView: React.FC = () => {
 
                       return (
                         <div 
-                          key={assignment.imageId}
+                          key={`${assignment.imageId}-${aIdx}`}
                           className={`rounded-xl border p-3 bg-slate-900/80 transition-all flex flex-col justify-between space-y-3 ${
                             isPrimary ? 'border-amber-500 ring-1 ring-amber-500/30' : 'border-slate-800 hover:border-slate-700'
                           }`}
@@ -447,12 +447,12 @@ export const ItemGroupingView: React.FC = () => {
           </div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3.5">
-            {unassignedItems.map(item => {
+            {unassignedItems.map((item, idx) => {
               const selected = selectedUnassignedIds.has(item.id);
 
               return (
                 <div
-                  key={item.id}
+                  key={`${item.id}-${idx}`}
                   onClick={() => toggleSelectUnassigned(item.id)}
                   className={`rounded-xl border p-2 bg-slate-950 cursor-pointer transition-all flex flex-col justify-between ${
                     selected

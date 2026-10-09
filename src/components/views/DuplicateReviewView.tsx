@@ -178,18 +178,18 @@ export const DuplicateReviewView: React.FC = () => {
         </div>
       ) : (
         <div className="space-y-6">
-          {filteredCandidates.map(candidate => {
+          {filteredCandidates.map((candidate, idx) => {
             const orig = items.find(i => i.id === candidate.originalImageId);
             const dup = items.find(i => i.id === candidate.duplicateImageId);
 
-            if (!orig || !dup) return null;
+            if (!orig || !dup || orig.id === dup.id) return null;
 
             const isExact = candidate.matchType === 'exact_sha256';
             const isResolved = candidate.status !== 'pending';
 
             return (
               <div
-                key={candidate.id}
+                key={`${candidate.id}-${idx}`}
                 className={`rounded-2xl border bg-slate-950 overflow-hidden shadow-xl transition-all ${
                   isResolved ? 'border-slate-800 opacity-60' : 'border-slate-700 hover:border-amber-500/40'
                 }`}

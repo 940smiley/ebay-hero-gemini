@@ -217,15 +217,17 @@ export function detectDuplicates(items: ImageItem[]): DuplicateCandidate[] {
     if (item.sha256) {
       if (shaMap.has(item.sha256)) {
         const orig = shaMap.get(item.sha256)!;
-        duplicates.push({
-          id: `dup-sha-${orig.id}-${item.id}`,
-          originalImageId: orig.id,
-          duplicateImageId: item.id,
-          matchType: 'exact_sha256',
-          similarityScore: 100,
-          status: 'pending',
-          detectedAt: new Date().toISOString(),
-        });
+        if (orig.id !== item.id) {
+          duplicates.push({
+            id: `dup-sha-${orig.id}-${item.id}`,
+            originalImageId: orig.id,
+            duplicateImageId: item.id,
+            matchType: 'exact_sha256',
+            similarityScore: 100,
+            status: 'pending',
+            detectedAt: new Date().toISOString(),
+          });
+        }
       } else {
         shaMap.set(item.sha256, item);
       }

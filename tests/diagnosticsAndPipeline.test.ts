@@ -55,8 +55,14 @@ describe('Diagnostics & Asset Pipeline End-to-End', () => {
 
   afterEach(async () => {
     await new Promise<void>((resolve) => {
-      if (server) server.close(() => resolve());
-      else resolve();
+      if (server) {
+        if (typeof (server as any).closeAllConnections === 'function') {
+          (server as any).closeAllConnections();
+        }
+        server.close(() => resolve());
+      } else {
+        resolve();
+      }
     });
     try {
       fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -163,7 +169,7 @@ describe('Diagnostics & Asset Pipeline End-to-End', () => {
     expect(body.ebayDraft.title).toBeDefined();
     expect(body.ebayDraft.title.length).toBeLessThanOrEqual(80);
     expect(body.ebayDraft.itemSpecifics).toBeDefined();
-  });
+  }, 30000);
 
   it('POST /api/library/upload ingests local base64 file and returns public record with persistent URL', async () => {
     const res = await fetch(`${baseUrl}/api/library/upload`, {

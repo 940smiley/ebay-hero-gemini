@@ -385,7 +385,7 @@ export const LocalFilePicker: React.FC<LocalFilePickerProps> = ({
           const rec = result.item;
           const isDup = Boolean(result.duplicate);
 
-          importedItems.push({
+          const newItem: ImageItem = {
             id: rec.id,
             originalName: rec.originalName,
             originalPath: staged.relativePath || rec.originalName,
@@ -402,7 +402,13 @@ export const LocalFilePicker: React.FC<LocalFilePickerProps> = ({
             sourceLocation: directoryName || staged.relativePath || 'Local Storage',
             createdAt: rec.importedAt || new Date().toISOString(),
             updatedAt: new Date().toISOString(),
-          });
+          };
+          const existingIdx = importedItems.findIndex(i => i.id === rec.id);
+          if (existingIdx !== -1) {
+            importedItems[existingIdx] = newItem;
+          } else {
+            importedItems.push(newItem);
+          }
 
           setUploadProgress(prev => ({
             ...prev,
@@ -617,13 +623,13 @@ export const LocalFilePicker: React.FC<LocalFilePickerProps> = ({
           </div>
         ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3.5">
-            {stagedFiles.map((item) => {
+            {stagedFiles.map((item, itIdx) => {
               const selected = selectedIds.has(item.id);
               const isInvalid = Boolean(item.validationError);
 
               return (
                 <div
-                  key={item.id}
+                  key={`${item.id}-${itIdx}`}
                   onClick={() => !isInvalid && !isUploading && toggleSelect(item.id)}
                   className={`rounded-xl border overflow-hidden p-2 bg-slate-950 cursor-pointer transition-all flex flex-col justify-between group relative ${
                     isInvalid

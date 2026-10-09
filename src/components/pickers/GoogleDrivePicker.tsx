@@ -142,11 +142,26 @@ export const GoogleDrivePicker: React.FC<GoogleDrivePickerProps> = ({ onImportCo
       }>(`/api/google/drive/list?${p.toString()}`);
 
       if (isLoadMore) {
-        setFolders(prev => [...prev, ...data.folders]);
-        setImages(prev => [...prev, ...data.images]);
+        setFolders(prev => {
+          const map = new Map<string, DriveFolder>();
+          prev.forEach(f => map.set(f.id, f));
+          (data.folders || []).forEach(f => map.set(f.id, f));
+          return Array.from(map.values());
+        });
+        setImages(prev => {
+          const map = new Map<string, DriveImage>();
+          prev.forEach(i => map.set(i.id, i));
+          (data.images || []).forEach(i => map.set(i.id, i));
+          return Array.from(map.values());
+        });
       } else {
-        setFolders(data.folders);
-        setImages(data.images);
+        const folderMap = new Map<string, DriveFolder>();
+        (data.folders || []).forEach(f => folderMap.set(f.id, f));
+        setFolders(Array.from(folderMap.values()));
+
+        const imgMap = new Map<string, DriveImage>();
+        (data.images || []).forEach(i => imgMap.set(i.id, i));
+        setImages(Array.from(imgMap.values()));
       }
       setNextPageToken(data.nextPageToken);
     } catch (err: any) {
@@ -249,8 +264,9 @@ export const GoogleDrivePicker: React.FC<GoogleDrivePickerProps> = ({ onImportCo
               current: prev.current + 1,
               currentName: event.item.originalName,
             }));
-            importedItems.push({
-              id: `drive-${event.item.id}`,
+            const driveItemId = `drive-${event.item.id}`;
+            const newItem: ImageItem = {
+              id: driveItemId,
               originalName: event.item.originalName,
               originalPath: `Google Drive/${event.folderPath || 'My Drive'}/${event.item.originalName}`,
               fileSize: event.item.size,
@@ -264,7 +280,13 @@ export const GoogleDrivePicker: React.FC<GoogleDrivePickerProps> = ({ onImportCo
               sourceLocation: event.folderPath || 'Google Drive',
               createdAt: new Date().toISOString(),
               updatedAt: new Date().toISOString(),
-            });
+            };
+            const existingIdx = importedItems.findIndex(i => i.id === driveItemId);
+            if (existingIdx !== -1) {
+              importedItems[existingIdx] = newItem;
+            } else {
+              importedItems.push(newItem);
+            }
           } else if (event.type === 'error') {
             console.warn('Import item error:', event);
           } else if (event.type === 'done') {
@@ -341,7 +363,7 @@ export const GoogleDrivePicker: React.FC<GoogleDrivePickerProps> = ({ onImportCo
         {/* Breadcrumb Path */}
         <div className="flex items-center gap-1.5 overflow-x-auto py-1 font-mono text-[11px]">
           {breadcrumbs.map((b, idx) => (
-            <React.Fragment key={b.id}>
+            <React.Fragment key={`${b.id}-${idx}`}>
               {idx > 0 && <ChevronRight className="w-3 h-3 text-slate-600 flex-shrink-0" />}
               <button
                 onClick={() => navigateToBreadcrumb(idx)}
@@ -402,9 +424,9 @@ export const GoogleDrivePicker: React.FC<GoogleDrivePickerProps> = ({ onImportCo
               <span>Folders ({folders.length})</span>
             </h4>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
-              {folders.map(f => (
+              {folders.map((f, fIdx) => (
                 <div
-                  key={f.id}
+                  key={`${f.id}-${fIdx}`}
                   onClick={() => navigateToFolder(f.id, f.name)}
                   className="p-3 rounded-xl bg-slate-950/60 hover:bg-slate-800 border border-slate-800 hover:border-blue-500/50 cursor-pointer transition-all flex items-center gap-2.5 group"
                 >
@@ -434,13 +456,13 @@ export const GoogleDrivePicker: React.FC<GoogleDrivePickerProps> = ({ onImportCo
             </div>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3.5">
-              {images.map(img => {
+              {images.map((img, imgIdx) => {
                 const selected = isSelected(selection, img.id, currentPathArray);
                 const thumbUrl = `/api/google/drive/thumb/${img.id}?size=256`;
 
                 return (
                   <div
-                    key={img.id}
+                    key={`${img.id}-${imgIdx}`}
                     onClick={() => handleToggleFile(img)}
                     className={`rounded-xl border overflow-hidden p-2 bg-slate-950 cursor-pointer transition-all flex flex-col justify-between ${
                       selected

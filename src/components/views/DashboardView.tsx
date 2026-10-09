@@ -177,9 +177,9 @@ export const DashboardView: React.FC = () => {
           </div>
 
           <div className="space-y-3">
-            {items.map((item) => (
+            {items.map((item, idx) => (
               <div 
-                key={item.id}
+                key={`${item.id}-${idx}`}
                 onClick={() => {
                   setSelectedItemId(item.id);
                   setActiveTab('ebay-studio');

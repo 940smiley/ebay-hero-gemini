@@ -294,13 +294,13 @@ export const RenamePreviewView: React.FC = () => {
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-800/80">
-              {filteredItems.map((item) => {
+              {filteredItems.map((item, idx) => {
                 const isSelected = selectedIds.has(item.id);
                 const isEditing = editingId === item.id;
 
                 return (
                   <tr
-                    key={item.id}
+                    key={`${item.id}-${idx}`}
                     className={`hover:bg-slate-800/40 transition-colors ${
                       isSelected ? 'bg-amber-500/5' : ''
                     }`}

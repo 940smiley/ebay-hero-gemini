@@ -418,8 +418,9 @@ export const GooglePhotosPicker: React.FC<GooglePhotosPickerProps> = ({ onImport
               currentName: event.item.originalName,
               importedCount: prev.importedCount + 1,
             }));
-            importedItems.push({
-              id: `photos-${event.item.id}`,
+            const photoItemId = `photos-${event.item.id}`;
+            const newItem: ImageItem = {
+              id: photoItemId,
               originalName: event.item.originalName,
               originalPath: `Google Photos/${event.item.originalName}`,
               fileSize: event.item.size,
@@ -433,7 +434,13 @@ export const GooglePhotosPicker: React.FC<GooglePhotosPickerProps> = ({ onImport
               sourceLocation: 'Google Photos Library',
               createdAt: new Date().toISOString(),
               updatedAt: new Date().toISOString(),
-            });
+            };
+            const existingIdx = importedItems.findIndex(i => i.id === photoItemId);
+            if (existingIdx !== -1) {
+              importedItems[existingIdx] = newItem;
+            } else {
+              importedItems.push(newItem);
+            }
           } else if (event.type === 'skip') {
             setImportProgress(prev => ({
               ...prev,
@@ -791,13 +798,13 @@ export const GooglePhotosPicker: React.FC<GooglePhotosPickerProps> = ({ onImport
 
             {/* Grid of photos */}
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3.5">
-              {pickedItems.map((photo) => {
+              {pickedItems.map((photo, pIdx) => {
                 const selected = selectedIds.has(photo.id);
                 const thumbUrl = session ? `/api/google/photos/session/${session.id}/thumb/${photo.id}?size=256` : '';
 
                 return (
                   <div
-                    key={photo.id}
+                    key={`${photo.id}-${pIdx}`}
                     onClick={() => toggleSelect(photo.id)}
                     className={`rounded-xl border overflow-hidden p-2 bg-slate-950 cursor-pointer transition-all flex flex-col justify-between ${
                       selected

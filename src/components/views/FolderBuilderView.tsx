@@ -126,9 +126,9 @@ export const FolderBuilderView: React.FC = () => {
           <div className="space-y-1">
             {childKeys.map((k) => renderTreeNode(node.children[k], depth + 1))}
 
-            {node.files.map((file) => (
+            {node.files.map((file, fIdx) => (
               <div
-                key={file.id}
+                key={`${file.id}-${fIdx}`}
                 className="flex items-center gap-2 py-1 px-2.5 text-[11px] text-slate-400 font-mono hover:text-amber-300 transition-colors"
                 style={{ paddingLeft: `${(depth + 1) * 18 + 14}px` }}
               >
